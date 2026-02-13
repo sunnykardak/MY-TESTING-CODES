@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Simple Flink Application Test
+
+Parameters:
+  AppName:
+    Type: String
+    Default: flink-test-app
+    Description: Name of the Flink application
+
+Resources:
+  FlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    Properties:
+      ApplicationName: !Ref AppName
+      RuntimeEnvironment: FLINK-1_18
+      ServiceExecutionRole: !Sub arn:aws:iam::${AWS::AccountId}:role/core-CloudformationStackAdmin
+      ApplicationConfiguration:
+        ApplicationCodeConfiguration:
+          CodeContentType: PLAINTEXT
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: DEFAULT
+
+Outputs:
+  ApplicationName:
+    Value: !Ref FlinkApplication
+    Description: Created Flink Application Name
