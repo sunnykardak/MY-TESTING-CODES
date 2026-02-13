@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+
+  MyKinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: MySampleStream
+      ShardCount: 1
+
+  MyFlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    Properties:
+      ApplicationName: MyFlinkApp
+      RuntimeEnvironment: FLINK-1_15
+
+      ServiceExecutionRole: arn:aws:iam::739275465799:role/kinesis-analytics-flink-service-role
+
+      ApplicationConfiguration:
+        ApplicationCodeConfiguration:
+          CodeContent:
+            S3ContentLocation:
+              BucketARN: arn:aws:s3:::your-bucket
+              FileKey: flink/app.jar
+          CodeContentType: ZIPFILE
