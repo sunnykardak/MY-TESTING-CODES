@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Flink Application with IAM Role
+
+Resources:
+  FlinkServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: flink-test-service-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: kinesisanalytics.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonKinesisFullAccess
+
+  FlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    DependsOn: FlinkServiceRole
+    Properties:
+      ApplicationName: flink-test-app
+      RuntimeEnvironment: FLINK-1_18
+      ServiceExecutionRole: !GetAtt FlinkServiceRole.Arn
+      ApplicationConfiguration:
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: CUSTOM
+            Parallelism: 1
+            ParallelismPerKPU: 1
+            AutoScalingEnabled: false
+        ApplicationSnapshotConfiguration:
+          SnapshotsEnabled: false
+
+Outputs:
+  ApplicationName:
+    Value: !Ref FlinkApplication
+  RoleArn:
+    Value: !GetAtt FlinkServiceRole.Arn
+```
+
+---
+
+## Deploy Command
+
+First delete the old stack:
+```
+aws cloudformation delete-stack --stack-name flink-test-stack --region eu-west-1
+```
+
+Then deploy:
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-test-v4.yaml" --stack-name flink-test-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
