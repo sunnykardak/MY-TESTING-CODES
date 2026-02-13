@@ -25,3 +25,38 @@ Outputs:
   ApplicationName:
     Value: !Ref FlinkApplication
     Description: Created Flink Application Name
+```
+
+---
+
+## Step 3: Run the Deploy Command
+
+Open your terminal and type this command (adjust the file path to match where you saved the file):
+```
+aws cloudformation deploy --template-file "C:\Users\YOUR_USERNAME\Downloads\flink-test-template.yaml" --stack-name flink-test-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+```
+
+**Replace `YOUR_USERNAME` with your actual Windows username** (like `B01565194` from your sample).
+
+---
+
+## Step 4: Check the Result
+
+After running, you'll see one of these:
+
+**If successful:**
+```
+Waiting for changeset to be created...
+Waiting for stack create/update to complete
+Successfully created/updated stack - flink-test-stack
+```
+
+**If error:** You'll see an error message telling you what permission is missing.
+
+---
+
+## Step 5: Clean Up (Delete the Test Stack)
+
+After testing, delete the stack with:
+```
+aws cloudformation delete-stack --stack-name flink-test-stack --region eu-west-1
