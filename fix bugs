@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Simple Flink Application Test
+
+Resources:
+  FlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    Properties:
+      ApplicationName: flink-test-app
+      RuntimeEnvironment: FLINK-1_18
+      ServiceExecutionRole: !Sub arn:aws:iam::${AWS::AccountId}:role/core-CloudformationStackAdmin
+      ApplicationConfiguration:
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: DEFAULT
+            Parallelism: 1
+            ParallelismPerKPU: 1
+        ApplicationSnapshotConfiguration:
+          SnapshotsEnabled: false
+
+Outputs:
+  ApplicationName:
+    Value: !Ref FlinkApplication
+```
+
+---
+
+## Step 2: Delete the Failed Stack First
+
+Before trying again, delete the failed stack:
+```
+aws cloudformation delete-stack --stack-name flink-test-stack --region eu-west-1
+```
+
+Wait 30 seconds, then check if deleted:
+```
+aws cloudformation describe-stacks --stack-name flink-test-stack --region eu-west-1
+```
+
+You should get an error saying stack doesn't exist (that means it's deleted).
+
+---
+
+## Step 3: Deploy the New Template
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-test-v2.yaml" --stack-name flink-test-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+```
+
+---
+
+## Step 4: If Still Getting Error
+
+Run this command to see the detailed error:
+```
+aws cloudformation describe-stack-events --stack-name flink-test-stack --region eu-west-1
