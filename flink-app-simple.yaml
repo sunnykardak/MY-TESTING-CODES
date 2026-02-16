@@ -1,0 +1,119 @@
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Simple Flink Application for POC Testing
+
+Resources:
+  FlinkAppRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName:
+        'Fn::Sub': 'svc-flink-app-role'
+      Policies:
+        - PolicyName:
+            'Fn::Sub': 'flink-app-policy'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Resource: "*"
+                Action:
+                  - kinesisanalytics:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStreamSummary
+                  - kinesis:RegisterStreamConsumer
+                  - kinesis:DeregisterStreamConsumer
+                  - kinesis:SubscribeToShard
+                  - kinesis:DescribeStreamConsumer
+                  - kinesis:ListStreams
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - logs:PutLogEvents
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                Effect: "Allow"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+
+  FlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    DependsOn: FlinkAppRole
+    Properties:
+      ApplicationName: flink-poc-app
+      RuntimeEnvironment: FLINK-1_18
+      ServiceExecutionRole: !GetAtt FlinkAppRole.Arn
+      ApplicationConfiguration:
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: CUSTOM
+            Parallelism: 1
+            ParallelismPerKPU: 1
+            AutoScalingEnabled: false
+        ApplicationSnapshotConfiguration:
+          SnapshotsEnabled: false
+
+Outputs:
+  ApplicationName:
+    Value: !Ref FlinkApplication
+  ApplicationArn:
+    Value: !GetAtt FlinkApplication.Arn
+  RoleArn:
+    Value: !GetAtt FlinkAppRole.Arn
+```
+
+---
+
+## Step 1: Delete Failed Stack
+```
+aws cloudformation delete-stack --stack-name flink-studio-stack2 --region eu-west-1
+```
+
+Wait 30 seconds.
+
+---
+
+## Step 2: Deploy Simple Flink Application
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-app-simple.yaml" --stack-name flink-app-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+
+Step 3: After Success - Verify in Console
+
+Go to AWS Console → Managed Apache Flink
+You should see flink-poc-app
+Status should be Ready
+
+
+What This Proves
+If this deployment succeeds, it confirms:
+ItemStatusCloudFormation permissions✅ WorkingIAM role creation✅ WorkingFlink application creation✅ WorkingYour POC setup✅ Ready
+
+Try this and let me know the result! Once this works, we can discuss how to add code and run the application.
