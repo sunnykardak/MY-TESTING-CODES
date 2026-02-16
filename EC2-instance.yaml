@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 instance for building Flink JAR
+
+Parameters:
+  KeyPairName:
+    Type: String
+    Description: Name of existing EC2 KeyPair (leave empty if none)
+    Default: ""
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
+
+Resources:
+  EC2Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: svc-ec2-build-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ec2-s3-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: "*"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  BuildInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0d64bb532e0502c46
+      InstanceType: t3.micro
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: flink-build-server
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y java-11-amazon-corretto-devel maven git
+          echo "Java and Maven installed successfully" > /home/ec2-user/setup-complete.txt
+
+Outputs:
+  InstanceId:
+    Value: !Ref BuildInstance
+  PublicIP:
+    Value: !GetAtt BuildInstance.PublicIp
+
+
+
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\ec2-build-server.yaml" --stack-name ec2-build-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
