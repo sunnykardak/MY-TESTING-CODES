@@ -1,0 +1,90 @@
+Sure! Let me explain Step 3 in detail - how to get and use the AWS sample JAR file.
+
+Step 3: Get AWS Sample Flink JAR
+AWS provides a ready-made sample application that reads from one Kinesis stream and writes to another. This is perfect for testing.
+
+Option A: Download from AWS Documentation (Easiest)
+
+Open this URL in your browser:
+
+   https://docs.aws.amazon.com/managed-flink/latest/java/get-started-exercise.html
+
+Look for the "Download the sample application" section
+Download the JAR file (it will be named something like amazon-kinesis-analytics-java-getting-started-1.0.jar)
+
+
+Option B: Download from AWS S3 Public Bucket
+Run this command in your terminal:
+aws s3 cp s3://aws-managed-flink-getting-started/java/amazon-kinesis-analytics-java-getting-started-1.0.jar "C:\Users\B01653960\Downloads\" --region us-east-1
+If this doesn't work, try the manual download from Option A.
+
+Option C: Use AWS Sample from GitHub
+
+Go to: https://github.com/aws-samples/amazon-kinesis-data-analytics-examples
+Look for the getting-started folder
+Download the pre-built JAR from releases
+
+
+Step 4: Upload JAR to Your S3 Bucket
+After downloading the JAR file, upload it to your S3 bucket:
+aws s3 cp "C:\Users\B01653960\Downloads\amazon-kinesis-analytics-java-getting-started-1.0.jar" s3://flink-poc-code-739275465799/flink-app.jar --region eu-west-1
+
+Step 5: Create Flink Application in AWS Console
+
+Go to AWS Console → Search "Managed Apache Flink"
+Click Create application
+Fill in these details:
+
+FieldValueApplication nameflink-poc-test-appDescriptionFlink POC Test ApplicationRuntimeApache Flink 1.18Service access permissionsChoose from IAM rolesIAM rolesvc-flink-poc-role-v2
+
+Under Application code location:
+
+FieldValueAmazon S3 bucketflink-poc-code-739275465799Path to Amazon S3 objectflink-app.jar
+
+Under Runtime properties, click Add item and add these:
+
+Group IDKeyValuekinesisinput.stream.nameflink-poc-input-streamkinesisoutput.stream.nameflink-poc-output-streamkinesisaws.regioneu-west-1
+
+Click Create application
+
+
+Step 6: Run the Application
+
+After application is created, click on it to open
+Click Run button
+Choose Run without snapshot
+Click Run
+Wait for status to change to Running (may take 2-3 minutes)
+
+
+Step 7: Send Test Data
+Once application is running, send test data to input stream:
+aws kinesis put-record --stream-name flink-poc-input-stream --partition-key test1 --data "eyJuYW1lIjoiSm9obiIsImFnZSI6MzB9" --region eu-west-1
+This sends: {"name":"John","age":30}
+Send a few more records:
+aws kinesis put-record --stream-name flink-poc-input-stream --partition-key test2 --data "eyJuYW1lIjoiSmFuZSIsImFnZSI6MjV9" --region eu-west-1
+aws kinesis put-record --stream-name flink-poc-input-stream --partition-key test3 --data "eyJuYW1lIjoiQm9iIiwiYWdlIjo0MH0=" --region eu-west-1
+
+Step 8: Check Output Stream
+Get shard iterator:
+aws kinesis get-shard-iterator --stream-name flink-poc-output-stream --shard-id shardId-000000000000 --shard-iterator-type TRIM_HORIZON --region eu-west-1
+This will return something like:
+json{
+    "ShardIterator": "AAAAAAAAAAE..."
+}
+```
+
+**Get records (copy the ShardIterator value):**
+```
+aws kinesis get-records --shard-iterator PASTE_YOUR_SHARD_ITERATOR_HERE --region eu-west-1
+You should see your processed records in the output!
+
+Summary of All Steps
+StepActionCommand/Location1Create Kinesis streamsCloudFormation flink-test-streams.yaml2Create IAM role v2CloudFormation flink-iam-role-v2.yaml3Download sample JARAWS docs or S34Upload JAR to S3aws s3 cp command5Create Flink appAWS Console UI6Run applicationAWS Console - Click Run7Send test dataaws kinesis put-record8Check outputaws kinesis get-records
+
+Current Progress Check
+Before proceeding, confirm:
+
+✅ Did flink-streams-stack deploy successfully?
+✅ Did flink-iam-role-v2-stack deploy successfully?
+✅ Did flink-s3-stack deploy successfully?
