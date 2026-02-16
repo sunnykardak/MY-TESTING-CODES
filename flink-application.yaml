@@ -1,0 +1,176 @@
+Step 1: Create Kinesis Streams (via CloudFormation)
+Create a new file flink-test-streams.yaml:
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Description: Kinesis streams for Flink POC testing
+
+Resources:
+  InputStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: flink-poc-input-stream
+      ShardCount: 1
+
+  OutputStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: flink-poc-output-stream
+      ShardCount: 1
+
+Outputs:
+  InputStreamName:
+    Value: !Ref InputStream
+  InputStreamArn:
+    Value: !GetAtt InputStream.Arn
+  OutputStreamName:
+    Value: !Ref OutputStream
+  OutputStreamArn:
+    Value: !GetAtt OutputStream.Arn
+```
+
+**Deploy command:**
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-test-streams.yaml" --stack-name flink-streams-stack --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+
+Step 2: Update IAM Role with Kinesis Permissions
+Create a new file flink-iam-role-v2.yaml:
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: IAM role for Flink POC with Kinesis permissions
+
+Resources:
+  FlinkServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName:
+        'Fn::Sub': 'svc-flink-poc-role-v2'
+      Policies:
+        - PolicyName:
+            'Fn::Sub': 'flink-poc-policy-v2'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Resource: "*"
+                Action:
+                  - kinesisanalytics:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - logs:PutLogEvents
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - cloudwatch:PutMetricData
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                Effect: "Allow"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+
+Outputs:
+  FlinkRoleArn:
+    Value: !GetAtt FlinkServiceRole.Arn
+    Description: ARN of the Flink service role
+```
+
+**Deploy command:**
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-iam-role-v2.yaml" --stack-name flink-iam-role-v2-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+
+Step 3: Create Flink Application Code
+You need a JAR file with Flink code. For testing, you can use the sample application from AWS.
+Option A: Use AWS Sample (Easiest)
+Download the sample Flink app from AWS:
+
+Go to: https://github.com/aws-samples/amazon-kinesis-data-analytics-examples
+Or use the AWS provided sample JAR
+
+Option B: I'll give you a simple Java code
+Do you have Java/Maven installed on your machine? Let me know and I can provide the code.
+
+Step 4: Upload JAR to S3
+First, create an S3 bucket for your Flink code:
+Create flink-s3-bucket.yaml:
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Description: S3 bucket for Flink application code
+
+Resources:
+  FlinkCodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: flink-poc-code-739275465799
+
+Outputs:
+  BucketName:
+    Value: !Ref FlinkCodeBucket
+```
+
+**Deploy:**
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-s3-bucket.yaml" --stack-name flink-s3-stack --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+```
+
+---
+
+## Step 5: Create Flink Application via UI
+
+1. Go to **AWS Console** → **Managed Apache Flink**
+2. Click **Create application**
+3. Fill in:
+
+| Field | Value |
+|-------|-------|
+| Application name | `flink-poc-test-app` |
+| Runtime | Apache Flink 1.18 |
+| IAM role | `svc-flink-poc-role-v2` |
+
+4. For **Application code location**:
+   - S3 bucket: `flink-poc-code-739275465799`
+   - Path to S3 object: (path to your JAR file)
+
+5. Click **Create application**
+
+---
+
+## Step 6: Send Test Data to Input Stream
+
+Once everything is set up, send test data:
+```
+aws kinesis put-record --stream-name flink-poc-input-stream --partition-key test --data "eyJtZXNzYWdlIjogIkhlbGxvIEZsaW5rISJ9" --region eu-west-1
+```
+
+(This sends `{"message": "Hello Flink!"}` encoded in base64)
+
+---
+
+## Step 7: Read Output Stream
+```
+aws kinesis get-shard-iterator --stream-name flink-poc-output-stream --shard-id shardId-000000000000 --shard-iterator-type TRIM_HORIZON --region eu-west-1
+```
+
+Then use the shard iterator to get records:
+```
+aws kinesis get-records --shard-iterator YOUR_SHARD_ITERATOR_HERE --region eu-west-1
+
