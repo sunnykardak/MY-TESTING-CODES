@@ -1,0 +1,239 @@
+Step 1: Delete Old Failed Stacks
+First, clean up any failed stacks:
+aws cloudformation delete-stack --stack-name flink-studio-stack2 --region eu-west-1
+Wait 30 seconds.
+
+Step 2: Create Studio Notebook Template
+Create a new file flink-studio-v2.yaml:
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: Flink Studio Notebook with Glue permissions
+
+Resources:
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: flink_poc_db
+        Description: Database for Flink POC
+
+  FlinkStudioRole:
+    Type: "AWS::IAM::Role"
+    DependsOn: GlueDatabase
+    Properties:
+      RoleName:
+        'Fn::Sub': 'svc-flink-studio-role-v2'
+      Policies:
+        - PolicyName:
+            'Fn::Sub': 'flink-studio-policy-v2'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:GetUserDefinedFunction
+                  - glue:GetUserDefinedFunctions
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:DeleteTable
+                  - glue:CreatePartition
+                  - glue:UpdatePartition
+                  - glue:DeletePartition
+                  - glue:BatchCreatePartition
+                  - glue:BatchDeletePartition
+                  - glue:BatchGetPartition
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/flink_poc_db'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/flink_poc_db/*'
+              - Effect: "Allow"
+                Action:
+                  - kinesisanalytics:*
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStreamSummary
+                  - kinesis:ListStreams
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
+                Resource: "*"
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource: "*"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+
+  FlinkStudioNotebook:
+    Type: AWS::KinesisAnalyticsV2::Application
+    DependsOn: FlinkStudioRole
+    Properties:
+      ApplicationName: flink-poc-studio
+      ApplicationMode: INTERACTIVE
+      RuntimeEnvironment: ZEPPELIN-FLINK-3_0
+      ServiceExecutionRole: !GetAtt FlinkStudioRole.Arn
+      ApplicationConfiguration:
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: CUSTOM
+            Parallelism: 4
+            ParallelismPerKPU: 1
+            AutoScalingEnabled: false
+        ZeppelinApplicationConfiguration:
+          CatalogConfiguration:
+            GlueDataCatalogConfiguration:
+              DatabaseARN: !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/flink_poc_db'
+          MonitoringConfiguration:
+            LogLevel: INFO
+
+Outputs:
+  NotebookName:
+    Value: !Ref FlinkStudioNotebook
+  GlueDatabaseName:
+    Value: !Ref GlueDatabase
+  RoleArn:
+    Value: !GetAtt FlinkStudioRole.Arn
+```
+
+---
+
+## Step 3: Deploy the Template
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-studio-v2.yaml" --stack-name flink-studio-stack --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+
+Step 4: If Deployment Succeeds
+
+Go to AWS Console → Search "Managed Apache Flink"
+Click "Studio notebooks" in left menu
+You should see flink-poc-studio
+Click on it
+Click "Run" button
+Wait for status to change to Running (2-3 minutes)
+Click "Open in Apache Zeppelin"
+
+
+Step 5: Create Kinesis Streams (if not already created)
+Create file kinesis-streams.yaml:
+yamlAWSTemplateFormatVersion: '2010-09-09'
+Description: Kinesis streams for Flink POC
+
+Resources:
+  InputStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: flink-poc-input-stream
+      ShardCount: 1
+
+  OutputStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: flink-poc-output-stream
+      ShardCount: 1
+
+Outputs:
+  InputStreamName:
+    Value: !Ref InputStream
+  OutputStreamName:
+    Value: !Ref OutputStream
+```
+
+Deploy:
+```
+aws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\kinesis-streams.yaml" --stack-name kinesis-streams-stack --region eu-west-1 --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+
+Step 6: Write Flink Code in Zeppelin Notebook
+Once the notebook is running and you open Zeppelin:
+
+Click "Create new note"
+Name it: FlinkPOCTest
+In the first cell, paste this code:
+
+sql%flink.ssql
+
+CREATE TABLE input_table (
+    message STRING,
+    event_time TIMESTAMP(3),
+    WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+) WITH (
+    'connector' = 'kinesis',
+    'stream' = 'flink-poc-input-stream',
+    'aws.region' = 'eu-west-1',
+    'scan.stream.initpos' = 'LATEST',
+    'format' = 'json'
+);
+
+Click Run (play button)
+In a new cell, paste:
+
+sql%flink.ssql
+
+CREATE TABLE output_table (
+    message STRING,
+    processed_time TIMESTAMP(3)
+) WITH (
+    'connector' = 'kinesis',
+    'stream' = 'flink-poc-output-stream',
+    'aws.region' = 'eu-west-1',
+    'format' = 'json'
+);
+
+Click Run
+In a new cell, paste:
+
+sql%flink.ssql(type=update)
+
+SELECT * FROM input_table;
+```
+
+8. Click **Run** - This will start listening for data
+
+---
+
+## Step 7: Send Test Data
+
+Open another Command Prompt and send test data:
+```
+aws kinesis put-record --stream-name flink-poc-input-stream --partition-key test1 --data "eyJtZXNzYWdlIjoiSGVsbG8gRmxpbmshIn0=" --region eu-west-1
+This sends: {"message":"Hello Flink!"}
+You should see the data appear in the Zeppelin notebook!
+
+What to Expect
+StepWhat HappensDeploy Studio NotebookCreates Flink Studio environmentRun NotebookStarts the Flink clusterOpen ZeppelinBrowser-based coding environmentCreate TablesDefines input/output connectionsRun QueryStarts streaming jobSend DataData flows through Flink
+
+Possible Errors
+ErrorMeaningSolutionGlue permission deniedPermissionsBoundary blocks GlueAsk lead to add Glue permissions to boundaryRole creation failedRole name existsChange role name in templateNotebook won't startResource limitsCheck AWS quotas
