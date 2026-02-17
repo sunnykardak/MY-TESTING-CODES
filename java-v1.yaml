@@ -1,27 +1,65 @@
-cd C:\devhome\projects\Flink-POC
+tep 1: Create the project
+Run the Maven command:
+bashcd C:\devhome\projects\Flink-POC
 
 mvn archetype:generate ^
   -DarchetypeGroupId=org.apache.flink ^
   -DarchetypeArtifactId=flink-quickstart-java ^
   -DarchetypeVersion=1.18.1 ^
-  -DgroupId=com.barclays.flink ^
-  -DartifactId=flink-banking-poc ^
+  -DgroupId=com.poc.flink ^
+  -DartifactId=flink-sample-app ^
   -Dversion=1.0-SNAPSHOT ^
   -DinteractiveMode=false
-```
+Step 2: Replace the default code
+Once created, open flink-sample-app/src/main/java/com/poc/flink/DataStreamJob.java and replace it with this simple app:
+javapackage com.poc.flink;
 
-This will create a project structure like:
-```
-flink-banking-poc/
-├── pom.xml
-└── src/
-    └── main/
-        └── java/
-            └── com/barclays/flink/
-                ├── DataStreamJob.java
-                └── ...
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
+public class DataStreamJob {
 
+    public static void main(String[] args) throws Exception {
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-cd flink-banking-poc
-code .
+        // Simple source that generates sample data
+        DataStream<String> stream = env.addSource(new SourceFunction<String>() {
+            private volatile boolean running = true;
+
+            @Override
+            public void run(SourceContext<String> ctx) throws Exception {
+                long count = 0;
+                while (running) {
+                    ctx.collect("Transaction-" + count + " | Amount: " + (Math.random() * 1000));
+                    count++;
+                    Thread.sleep(1000); // emit every 1 second
+                }
+            }
+
+            @Override
+            public void cancel() {
+                running = false;
+            }
+        });
+
+        stream.map(value -> "Processed: " + value)
+              .print();
+
+        env.execute("Flink Sample POC");
+    }
+}
+This app simply generates fake transactions every second and logs them — enough to prove the setup works.
+Step 3: Build the JAR
+bashcd flink-sample-app
+mvn clean package -DskipTests
+The JAR will be at: target/flink-sample-app-1.0-SNAPSHOT.jar
+Step 4: Deploy to AWS Managed Flink
+
+Upload the JAR to an S3 bucket in your AWS account
+Go to Amazon Managed Apache Flink in the console
+Click Create Application
+Set runtime to Apache Flink 1.18
+Point to your S3 JAR location
+For the IAM role — use the one your admin pre-created (from our earlier discussion)
+Click Create and then Run
