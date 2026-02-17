@@ -63,3 +63,193 @@ Set runtime to Apache Flink 1.18
 Point to your S3 JAR location
 For the IAM role — use the one your admin pre-created (from our earlier discussion)
 Click Create and then Run
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Managed Flink - Sample POC Application
+
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: flink-sample-poc
+    Description: Name of the Flink application
+
+  S3BucketName:
+    Type: String
+    Description: S3 bucket name where the JAR file is uploaded
+
+  S3JarKey:
+    Type: String
+    Default: flink-apps/flink-sample-app-1.0-SNAPSHOT.jar
+    Description: S3 key path to the JAR file
+
+  RuntimeEnvironment:
+    Type: String
+    Default: FLINK-1_18
+    AllowedValues:
+      - FLINK-1_18
+      - FLINK-1_15
+    Description: Apache Flink runtime version
+
+Resources:
+
+  # ============================================
+  # IAM Role for Managed Flink Application
+  # ============================================
+  FlinkAppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ApplicationName}-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: kinesisanalytics.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub '${ApplicationName}-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # S3 Access - Read JAR file
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}'
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}*'
+
+              # CloudWatch Metrics
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+
+  # ============================================
+  # CloudWatch Log Group
+  # ============================================
+  FlinkLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/kinesis-analytics/${ApplicationName}'
+      RetentionInDays: 7
+
+  FlinkLogStream:
+    Type: AWS::Logs::LogStream
+    DependsOn: FlinkLogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/kinesis-analytics/${ApplicationName}'
+      LogStreamName: 'flink-app-log-stream'
+
+  # ============================================
+  # Managed Flink Application
+  # ============================================
+  FlinkApplication:
+    Type: AWS::KinesisAnalyticsV2::Application
+    DependsOn:
+      - FlinkAppRole
+      - FlinkLogStream
+    Properties:
+      ApplicationName: !Ref ApplicationName
+      RuntimeEnvironment: !Ref RuntimeEnvironment
+      ServiceExecutionRole: !GetAtt FlinkAppRole.Arn
+      ApplicationConfiguration:
+        ApplicationCodeConfiguration:
+          CodeContent:
+            S3ContentLocation:
+              BucketARN: !Sub 'arn:aws:s3:::${S3BucketName}'
+              FileKey: !Ref S3JarKey
+          CodeContentType: ZIPFILE
+        EnvironmentProperties:
+          PropertyGroups:
+            - PropertyGroupId: FlinkApplicationProperties
+              PropertyMap:
+                environment: poc
+        FlinkApplicationConfiguration:
+          ParallelismConfiguration:
+            ConfigurationType: CUSTOM
+            Parallelism: 1
+            ParallelismPerKPU: 1
+            AutoScalingEnabled: false
+          CheckpointConfiguration:
+            ConfigurationType: CUSTOM
+            CheckpointingEnabled: true
+            CheckpointInterval: 60000
+            MinPauseBetweenCheckpoints: 5000
+          MonitoringConfiguration:
+            ConfigurationType: CUSTOM
+            MetricsLevel: APPLICATION
+            LogLevel: INFO
+
+  # ============================================
+  # CloudWatch Logging for Flink App
+  # ============================================
+  FlinkAppLogging:
+    Type: AWS::KinesisAnalyticsV2::ApplicationCloudWatchLoggingOption
+    DependsOn: FlinkApplication
+    Properties:
+      ApplicationName: !Ref ApplicationName
+      CloudWatchLoggingOption:
+        LogStreamARN: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}:log-stream:flink-app-log-stream'
+
+Outputs:
+  ApplicationName:
+    Description: Flink Application Name
+    Value: !Ref ApplicationName
+
+  ApplicationRoleARN:
+    Description: IAM Role ARN for Flink Application
+    Value: !GetAtt FlinkAppRole.Arn
+
+  LogGroupName:
+    Description: CloudWatch Log Group
+    Value: !Sub '/aws/kinesis-analytics/${ApplicationName}'
+
+  S3JarLocation:
+    Description: S3 location of the JAR file
+    Value: !Sub 's3://${S3BucketName}/${S3JarKey}'
