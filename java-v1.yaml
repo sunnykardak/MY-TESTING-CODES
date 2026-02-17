@@ -1,0 +1,27 @@
+cd C:\devhome\projects\Flink-POC
+
+mvn archetype:generate ^
+  -DarchetypeGroupId=org.apache.flink ^
+  -DarchetypeArtifactId=flink-quickstart-java ^
+  -DarchetypeVersion=1.18.1 ^
+  -DgroupId=com.barclays.flink ^
+  -DartifactId=flink-banking-poc ^
+  -Dversion=1.0-SNAPSHOT ^
+  -DinteractiveMode=false
+```
+
+This will create a project structure like:
+```
+flink-banking-poc/
+├── pom.xml
+└── src/
+    └── main/
+        └── java/
+            └── com/barclays/flink/
+                ├── DataStreamJob.java
+                └── ...
+
+
+
+cd flink-banking-poc
+code .
