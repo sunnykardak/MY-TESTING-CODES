@@ -10,3 +10,76 @@ Resources:
     Properties:
       LogGroupName: !Ref FlinkLogGroup
       LogStreamName: flink-poc-log-stream
+
+
+
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: CloudFormation template for Flink POC IAM role
+
+Resources:
+  FlinkServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName:
+        'Fn::Sub': 'svc-flink-poc-role'
+      Policies:
+        - PolicyName:
+            'Fn::Sub': 'flink-poc-policy'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Resource: "*"
+                Action:
+                  - s3:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - kinesisanalytics:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - kinesis:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - logs:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - cloudwatch:*
+                Effect: "Allow"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+
+  FlinkLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/kinesis-analytics/flink-poc-nishikesh
+      RetentionInDays: 7
+
+  FlinkLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogGroupName: !Ref FlinkLogGroup
+      LogStreamName: flink-poc-log-stream
+
+Outputs:
+  FlinkRoleArn:
+    Value: !GetAtt FlinkServiceRole.Arn
+    Description: ARN of the Flink service role
+  FlinkLogGroupName:
+    Value: !Ref FlinkLogGroup
+    Description: CloudWatch Log Group for Flink application
+  FlinkLogStreamName:
+    Value: !Ref FlinkLogStream
+    Description: CloudWatch Log Stream for Flink application
