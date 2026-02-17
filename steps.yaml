@@ -1,0 +1,12 @@
+Now you need to link the CloudWatch logging to your existing Flink application. Here's what to do:
+Step 1: Get the current application version
+bashaws kinesisanalyticsv2 describe-application --application-name flink-poc-nishikesh --region eu-west-1
+Look for ApplicationVersionId in the output.
+Step 2: Add CloudWatch logging to the application
+bashaws kinesisanalyticsv2 add-application-cloud-watch-logging-option --application-name flink-poc-nishikesh --region eu-west-1 --current-application-version-id <VERSION_NUMBER> --cloud-watch-logging-option LogStreamARN=arn:aws:logs:eu-west-1:739275465799:log-group:/aws/kinesis-analytics/flink-poc-nishikesh:log-stream:flink-poc-log-stream
+Replace <VERSION_NUMBER> with the version from Step 1.
+Step 3: Start the application
+bashaws kinesisanalyticsv2 start-application --application-name flink-poc-nishikesh --region eu-west-1
+Step 4: Verify logs are flowing
+Go to CloudWatch → Log Groups → /aws/kinesis-analytics/flink-poc-nishikesh and you should now see logs appearing.
+Alternatively, you can do Step 2 from the AWS Console → Managed Flink → flink-poc-nishikesh → Configure → Monitoring — enable CloudWatch logging and select the log group. That's easier if you prefer the UI. Opus 4.6Claude is AI and can make mistakes. Please double-check responses.
