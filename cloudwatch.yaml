@@ -1,0 +1,12 @@
+Resources:
+  FlinkLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/kinesis-analytics/flink-poc-nishikesh
+      RetentionInDays: 7
+
+  FlinkLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogGroupName: !Ref FlinkLogGroup
+      LogStreamName: flink-poc-log-stream
