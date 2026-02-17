@@ -97,7 +97,8 @@ Click Create and then Run
 
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS Managed Flink - Sample POC Application
+Transform: 'AWS::Serverless-2016-10-31'
+Description: CloudFormation template for Flink POC - Application with IAM role
 
 Parameters:
   ApplicationName:
@@ -114,61 +115,53 @@ Parameters:
     Default: flink-apps/flink-sample-app-1.0-SNAPSHOT.jar
     Description: S3 key path to the JAR file
 
-  RuntimeEnvironment:
-    Type: String
-    Default: FLINK-1_18
-    AllowedValues:
-      - FLINK-1_18
-      - FLINK-1_15
-    Description: Apache Flink runtime version
-
 Resources:
 
   # ============================================
-  # IAM Role for Managed Flink Application
+  # IAM Role (using working pattern with PermissionsBoundary)
   # ============================================
-  FlinkAppRole:
-    Type: AWS::IAM::Role
+  FlinkServiceRole:
+    Type: "AWS::IAM::Role"
     Properties:
-      RoleName: !Sub '${ApplicationName}-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: kinesisanalytics.amazonaws.com
-            Action: sts:AssumeRole
+      RoleName:
+        'Fn::Sub': 'svc-flink-poc-role'
       Policies:
-        - PolicyName: !Sub '${ApplicationName}-policy'
+        - PolicyName:
+            'Fn::Sub': 'flink-poc-policy'
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
-              # S3 Access - Read JAR file
-              - Effect: Allow
+              - Resource: "*"
+                Action:
+                  - kinesisanalytics:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - kinesis:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - logs:*
+                Effect: "Allow"
+              - Resource: "*"
+                Action:
+                  - cloudwatch:*
+                Effect: "Allow"
+              - Resource: "*"
                 Action:
                   - s3:GetObject
                   - s3:GetObjectVersion
                   - s3:ListBucket
-                Resource:
-                  - !Sub 'arn:aws:s3:::${S3BucketName}'
-                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
-
-              # CloudWatch Logs
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                Resource:
-                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}*'
-
-              # CloudWatch Metrics
-              - Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricData
-                Resource: '*'
+                Effect: "Allow"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "kinesisanalytics.amazonaws.com"
+      PermissionsBoundary:
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
 
   # ============================================
   # CloudWatch Log Group
@@ -192,12 +185,12 @@ Resources:
   FlinkApplication:
     Type: AWS::KinesisAnalyticsV2::Application
     DependsOn:
-      - FlinkAppRole
+      - FlinkServiceRole
       - FlinkLogStream
     Properties:
       ApplicationName: !Ref ApplicationName
-      RuntimeEnvironment: !Ref RuntimeEnvironment
-      ServiceExecutionRole: !GetAtt FlinkAppRole.Arn
+      RuntimeEnvironment: FLINK-1_18
+      ServiceExecutionRole: !GetAtt FlinkServiceRole.Arn
       ApplicationConfiguration:
         ApplicationCodeConfiguration:
           CodeContent:
@@ -238,18 +231,14 @@ Resources:
         LogStreamARN: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}:log-stream:flink-app-log-stream'
 
 Outputs:
+  FlinkRoleArn:
+    Value: !GetAtt FlinkServiceRole.Arn
+    Description: ARN of the Flink service role
+
   ApplicationName:
     Description: Flink Application Name
     Value: !Ref ApplicationName
 
-  ApplicationRoleARN:
-    Description: IAM Role ARN for Flink Application
-    Value: !GetAtt FlinkAppRole.Arn
-
   LogGroupName:
     Description: CloudWatch Log Group
     Value: !Sub '/aws/kinesis-analytics/${ApplicationName}'
-
-  S3JarLocation:
-    Description: S3 location of the JAR file
-    Value: !Sub 's3://${S3BucketName}/${S3JarKey}'
