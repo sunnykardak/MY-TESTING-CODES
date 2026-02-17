@@ -10,3 +10,35 @@ bashaws kinesisanalyticsv2 start-application --application-name flink-poc-nishik
 Step 4: Verify logs are flowing
 Go to CloudWatch → Log Groups → /aws/kinesis-analytics/flink-poc-nishikesh and you should now see logs appearing.
 Alternatively, you can do Step 2 from the AWS Console → Managed Flink → flink-poc-nishikesh → Configure → Monitoring — enable CloudWatch logging and select the log group. That's easier if you prefer the UI. Opus 4.6Claude is AI and can make mistakes. Please double-check responses.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The error says "Kinesis Analytics currently supports only 1 logging option" — this means CloudWatch logging is already configured on your application from when you set it up earlier via the console.
+So you're already good! You just need to update the existing logging option to point to the new log stream.
+Option A: Do it from the Console (easiest)
+
+Go to Managed Flink → flink-poc-nishikesh → Configure → Monitoring
+Update the log group/stream to /aws/kinesis-analytics/flink-poc-nishikesh and flink-poc-log-stream
+Save and start the application
+
+Option B: Via CLI — first delete the old logging option, then add the new one
+Step 1: Get the existing CloudWatch logging option ID:
+bashaws kinesisanalyticsv2 describe-application --application-name flink-poc-nishikesh --region eu-west-1
+Look for CloudWatchLoggingOptionDescriptions → note the CloudWatchLoggingOptionId.
+Step 2: Delete the old one:
+bashaws kinesisanalyticsv2 delete-application-cloud-watch-logging-option --application-name flink-poc-nishikesh --region eu-west-1 --current-application-version-id <VERSION> --cloud-watch-logging-option-id <LOGGING_OPTION_ID>
+Step 3: Add the new one:
+bashaws kinesisanalyticsv2 add-application-cloud-watch-logging-option --application-name flink-poc-nishikesh --region eu-west-1 --current-application-version-id <NEW_VERSION> --cloud-watch-logging-option LogStreamARN=arn:aws:logs:eu-west-1:739275465799:log-group:/aws/kinesis-analytics/flink-poc-nishikesh:log-stream:flink-poc-log-stream
+I'd recommend Option A via the console — much quicker for this.
