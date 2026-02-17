@@ -83,3 +83,30 @@ Outputs:
   FlinkLogStreamName:
     Value: !Ref FlinkLogStream
     Description: CloudWatch Log Stream for Flink application
+
+
+
+
+
+
+
+
+Here are the step-by-step instructions:
+Step 1: Stop the Flink application
+bashaws kinesisanalyticsv2 stop-application --application-name flink-poc-nishikesh --region eu-west-1
+Wait for it to stop. You can check the status with:
+bashaws kinesisanalyticsv2 describe-application --application-name flink-poc-nishikesh --region eu-west-1
+Wait until the status shows READY.
+Step 2: Update the CloudFormation stack with the new template
+bashaws cloudformation deploy --template-file "C:\Users\B01653960\Downloads\flink-test-v5\flink-cf-template.yaml" --region eu-west-1 --stack-name flink-studio-stack --capabilities CAPABILITY_NAMED_IAM --role-arn arn:aws:iam::739275465799:role/core-CloudformationStackAdmin
+Wait for Successfully created/updated stack message.
+Step 3: Configure CloudWatch logging on the application
+Go to the AWS Console → Managed Flink → flink-poc-nishikesh → Configure → Monitoring section, enable CloudWatch logging, and set the log group to /aws/kinesis-analytics/flink-poc-nishikesh.
+Alternatively via CLI:
+bashaws kinesisanalyticsv2 add-application-cloud-watch-logging-option --application-name flink-poc-nishikesh --region eu-west-1 --cloud-watch-logging-option LogStreamARN=arn:aws:logs:eu-west-1:739275465799:log-group:/aws/kinesis-analytics/flink-poc-nishikesh:log-stream:flink-poc-log-stream
+Step 4: Start the Flink application
+bashaws kinesisanalyticsv2 start-application --application-name flink-poc-nishikesh --region eu-west-1
+Step 5: Verify
+
+Check application status: describe-application command from Step 1
+Check CloudWatch: Go to CloudWatch → Log Groups → /aws/kinesis-analytics/flink-poc-nishikesh — you should now see logs flowing in
