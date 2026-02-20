@@ -1,0 +1,12 @@
+How to use it — 3 commands
+Build:
+bashmvn clean package -DskipTests
+Run the producer (on your laptop, replaces Python script):
+bashjava -cp target/flink-poc-complete-1.0.0.jar \
+     com.example.flink.KinesisRecordProducer \
+     --rate 5 --count 100
+Upload Flink JAR to S3:
+bashaws s3 cp target/flink-poc-complete-1.0.0.jar \
+    s3://flink-poc-app-nishikesh/java/flink-java-app.jar \
+    --region eu-west-1
+Both the producer and the Flink consumer are in the same JAR — you just call different main classes. The producer runs on your laptop, Flink runs on AWS MSF, and Kinesis is the bridge between them.
