@@ -1,0 +1,1 @@
+aws cloudformation delete-stack --stack-name flink-poc-stack2 --region eu-west-1
