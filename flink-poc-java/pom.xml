@@ -60,7 +60,7 @@
         </dependency>
 
         <!-- ================================================================ -->
-        <!-- FLINK S3 FILESYSTEM  (StreamingFileSink → S3)                    -->
+        <!-- FLINK S3 FILESYSTEM  (StreamingFileSink -> S3)                   -->
         <!-- ================================================================ -->
         <dependency>
             <groupId>org.apache.flink</groupId>
@@ -105,13 +105,30 @@
         </dependency>
 
         <!-- ================================================================ -->
-        <!-- LOGGING  (provided via MSF)                                      -->
+        <!-- LOGGING                                                          -->
+        <!--                                                                  -->
+        <!-- FIX: slf4j-api must be compile scope (NOT provided) so it       -->
+        <!-- bundles into the fat JAR. AWS SDK v2 looks for                  -->
+        <!-- org/slf4j/impl/StaticLoggerBinder at runtime — without it       -->
+        <!-- you get ClassNotFoundException on the producer.                  -->
+        <!--                                                                  -->
+        <!-- slf4j-simple provides the concrete implementation needed when    -->
+        <!-- running the producer standalone on your laptop.                  -->
+        <!-- MSF cluster has its own SLF4J impl — no conflict because Flink  -->
+        <!-- core is marked provided and loads from cluster classpath first.  -->
         <!-- ================================================================ -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.36</version>
-            <scope>provided</scope>
+            <!-- compile scope: bundled in JAR for standalone producer use -->
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.36</version>
+            <!-- concrete impl needed by AWS SDK v2 when running standalone -->
         </dependency>
 
     </dependencies>
@@ -147,10 +164,9 @@
 
                             <artifactSet>
                                 <excludes>
-                                    <!-- Already on MSF cluster classpath -->
+                                    <!-- Already on MSF cluster classpath — do NOT exclude slf4j -->
                                     <exclude>org.apache.flink:flink-streaming-java</exclude>
                                     <exclude>org.apache.flink:flink-clients</exclude>
-                                    <exclude>org.slf4j:slf4j-api</exclude>
                                 </excludes>
                             </artifactSet>
 
@@ -167,7 +183,7 @@
                             </filters>
 
                             <transformers>
-                                <!-- Default entry point = Flink consumer -->
+                                <!-- Default entry point = Flink consumer (for MSF) -->
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.example.flink.FlinkConsumerMain</mainClass>
                                 </transformer>
