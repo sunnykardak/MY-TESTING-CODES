@@ -1,3 +1,83 @@
+New Two-Step Deployment Plan
+Step 1 — Deploy your EXISTING working template first (creates the role)
+You already said flink-cf-template.yaml works. Deploy it as a separate stack:
+powershellaws cloudformation deploy `
+  --template-file flink-cf-template.yaml `
+  --stack-name flink-iam-stack `
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM `
+  --region eu-west-1
+Step 2 — Get the Role ARN it created
+powershellaws cloudformation describe-stacks `
+  --stack-name flink-iam-stack `
+  --region eu-west-1 `
+  --query "Stacks[0].Outputs[?OutputKey=='FlinkRoleArn'].OutputValue" `
+  --output text
+
+# Output looks like:
+# arn:aws:iam::739275465799:role/svc-flink-poc-role
+# Copy this!
+Step 3 — Delete old broken stack
+powershellaws cloudformation delete-stack `
+  --stack-name flink-poc-stack `
+  --region eu-west-1
+Step 4 — Deploy our new template with the Role ARN
+powershellaws cloudformation deploy `
+  --template-file cloudformation/flink-full-stack.yaml `
+  --stack-name flink-poc-stack `
+  --capabilities CAPABILITY_AUTO_EXPAND `
+  --region eu-west-1 `
+  --parameter-overrides `
+      ApplicationName=flink-poc `
+      BucketSuffix=flink-poc `
+      FlinkRoleArn=arn:aws:iam::739275465799:role/svc-flink-poc-role
+
+Replace 739275465799 with your actual account ID and the role name with whatever was output in Step 2.
+
+
+This approach works because your existing flink-cf-template.yaml already has the correct permissions boundary and successfully creates the role — so we just reuse it instead of fighting the permissions issue again.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 aws cloudformation deploy `
   --template-file cloudformation/flink-full-stack.yaml `
   --stack-name flink-poc-stack `
