@@ -1,21 +1,15 @@
 """
 PyFlink Banking Log Processor
 ==============================
-Reads IBF-AUTHLO log records from Kinesis,
+Reads banking log records from Kinesis,
 processes them, and writes output to S3 as JSON files.
-CloudWatch logs are automatically captured by AWS Managed Flink.
 
 Architecture:
     Kinesis (input) → PyFlink → S3 (output JSON files)
                              → CloudWatch Logs (auto via Managed Flink)
 
-Flink Version  : 1.16
-Connector JARs : flink-connector-kinesis-4.0.0-1.16.jar  (from client Nexus)
-                 flink-s3-fs-hadoop-1.16.1.jar            (from client Nexus)
-
-LOCAL testing  : Place JARs in  flink-poc/jars/
-AWS deployment : Upload JARs to s3://your-bucket/jars/
-                 Upload this file zipped to s3://your-bucket/python/flink-python-app.zip
+Flink Version  : 1.18
+Connector JARs : flink-sql-connector-kinesis-4.0.0-1.16.jar
 """
 
 import json
@@ -33,7 +27,9 @@ from pyflink.datastream.functions import (
     RichMapFunction,
 )
 
+# ──────────────────────────────────────────────────────────────
 # AWS Managed Flink runtime properties
+# ──────────────────────────────────────────────────────────────
 try:
     from amazonaws.kinesis.analytics.runtime import KinesisAnalyticsRuntime
     IS_AWS = True
@@ -41,7 +37,7 @@ except ImportError:
     IS_AWS = False
 
 # ──────────────────────────────────────────────────────────────
-# Logging — goes to CloudWatch automatically on AWS Managed Flink
+# Logging
 # ──────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -51,23 +47,18 @@ logger = logging.getLogger("BankingLogProcessor")
 
 
 # ──────────────────────────────────────────────────────────────
-# Config
+# Config — matches your CloudFormation ApplicationProperties
 # ──────────────────────────────────────────────────────────────
-
 DEFAULT_CONFIG = {
-    "input_stream":    "flink-poc-input-stream",
-    "output_bucket":   "flink-poc-output-bucket",   # your S3 bucket name
+    "input_stream":    "flink-poc-nishikesh-input-stream",
+    "output_bucket":   "739275465799-flink-poc-output",
     "output_prefix":   "processed-logs",
-    "region":          "ap-south-1",
-    "stream_position": "LATEST",                    # LATEST or TRIM_HORIZON
+    "region":          "eu-west-1",
+    "stream_position": "LATEST",
 }
 
 
 def get_config():
-    """
-    Load config from AWS Managed Flink runtime properties if on AWS,
-    otherwise fall back to defaults for local testing.
-    """
     if IS_AWS:
         try:
             props = KinesisAnalyticsRuntime.get_application_properties()
@@ -103,13 +94,7 @@ class ValidJsonFilter(FilterFunction):
 
 
 class BankingLogEnricher(RichMapFunction):
-    """
-    Enriches each banking log record with:
-    - processing_timestamp
-    - is_failed_auth  (True if auth_status is FAILED/UNKNOWN/TIMEOUT)
-    - is_suspicious   (failed auth on sensitive payment/transfer URLs)
-    - flink_subtask_id (which Flink slot processed this record)
-    """
+    """Enriches each banking log record."""
 
     def open(self, runtime_context: RuntimeContext):
         self.task_index = runtime_context.get_index_of_this_subtask()
@@ -119,7 +104,6 @@ class BankingLogEnricher(RichMapFunction):
         try:
             record = json.loads(value)
 
-            # ── Enrichment fields ───────────────────────────
             record["processing_timestamp"] = datetime.utcnow().isoformat() + "Z"
             record["flink_subtask_id"]     = self.task_index
 
@@ -127,19 +111,16 @@ class BankingLogEnricher(RichMapFunction):
             record["is_failed_auth"] = auth_status in ("FAILED", "UNKNOWN", "TIMEOUT")
             record["is_successful"]  = auth_status == "IN"
 
-            # Flag suspicious: failed login on sensitive URL
             sensitive_paths = ["/olb/transfer/initiate.do", "/olb/payment/neft.do"]
             record["is_suspicious"] = (
                 record["is_failed_auth"]
                 and record.get("url_path", "") in sensitive_paths
             )
 
-            # Parse event_date from Timestamp if not present
             if "event_date" not in record:
                 ts = record.get("Timestamp", record.get("@timestamp", ""))
                 record["event_date"] = ts[:10] if ts else "unknown"
 
-            # ── CloudWatch log line ─────────────────────────
             log_msg = (
                 f"PROCESSED | account={record.get('account_number', 'N/A')} "
                 f"auth={auth_status} "
@@ -166,7 +147,7 @@ class BankingLogEnricher(RichMapFunction):
 
 
 class SuspiciousActivityLogger(MapFunction):
-    """Extra logging pass — logs suspicious records with ALERT prefix."""
+    """Extra logging pass for suspicious records."""
 
     def map(self, value: str) -> str:
         try:
@@ -190,46 +171,20 @@ class SuspiciousActivityLogger(MapFunction):
 
 def main():
     config = get_config()
-    logger.info(f"Starting BankingLogProcessor | Flink 1.16 | config: {config}")
+    logger.info(f"Starting BankingLogProcessor | Flink 1.18 | config: {config}")
 
     # ── 1. Execution Environment ────────────────────────────
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)
-    env.enable_checkpointing(60_000)  # checkpoint every 60 seconds
+    env.enable_checkpointing(60_000)
 
-    # ── 2. Add Connector JARs ───────────────────────────────
-    # On AWS Managed Flink → JARs are loaded from S3 via CloudFormation
-    #   property: kinesis.analytics.flink.run.options → jarfile
-    #   S3 path : s3://your-bucket/jars/flink-connector-kinesis-4.0.0-1.16.jar
-    #
-    # For LOCAL testing → JARs are loaded from flink-poc/jars/ folder
-    if not IS_AWS:
-        # flink-poc/jars/ — put your downloaded JARs here for local testing
-        jar_dir     = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jars"))
-        kinesis_jar = os.path.join(jar_dir, "flink-connector-kinesis-4.0.0-1.16.jar")
-        s3_jar      = os.path.join(jar_dir, "flink-s3-fs-hadoop-1.16.1.jar")
-
-        if os.path.exists(kinesis_jar):
-            env.add_jars(f"file://{kinesis_jar}")
-            logger.info(f"Loaded JAR (local): {kinesis_jar}")
-        else:
-            logger.warning(f"JAR not found — download to flink-poc/jars/: {kinesis_jar}")
-
-        if os.path.exists(s3_jar):
-            env.add_jars(f"file://{s3_jar}")
-            logger.info(f"Loaded JAR (local): {s3_jar}")
-        else:
-            logger.warning(f"JAR not found — download to flink-poc/jars/: {s3_jar}")
-
-    # ── 3. Kinesis Source Properties ────────────────────────
+    # ── 2. Kinesis Source Properties ────────────────────────
     kinesis_props = {
         "aws.region":           config["region"],
         "flink.stream.initpos": config["stream_position"],
-        # AWS Managed Flink uses IAM role credentials automatically.
-        # Local testing: set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars.
     }
 
-    # ── 4. Kinesis Source ───────────────────────────────────
+    # ── 3. Kinesis Source ───────────────────────────────────
     from pyflink.datastream.connectors.kinesis import FlinkKinesisConsumer
 
     kinesis_source = FlinkKinesisConsumer(
@@ -238,7 +193,7 @@ def main():
         config_props=kinesis_props,
     )
 
-    # ── 5. Build the Pipeline ───────────────────────────────
+    # ── 4. Build the Pipeline ───────────────────────────────
     stream = (
         env
         .add_source(kinesis_source, source_name="Kinesis-Input")
@@ -250,10 +205,7 @@ def main():
         .name("Log-Suspicious-Activity")
     )
 
-    # ── 6. S3 Sink (StreamingFileSink) ──────────────────────
-    # Requires: flink-s3-fs-hadoop-1.16.1.jar
-    # Files roll every 5 minutes or 128MB.
-    # Visible in S3 after first checkpoint (~60 seconds).
+    # ── 5. S3 Sink ──────────────────────────────────────────
     from pyflink.datastream.connectors.file_system import (
         StreamingFileSink,
         RollingPolicy,
@@ -272,9 +224,9 @@ def main():
         )
         .with_rolling_policy(
             RollingPolicy.default_rolling_policy(
-                part_size=128 * 1024 * 1024,     # 128 MB
-                rollover_interval=5 * 60 * 1000,  # 5 minutes
-                inactivity_interval=60 * 1000,    # 1 minute idle
+                part_size=128 * 1024 * 1024,
+                rollover_interval=5 * 60 * 1000,
+                inactivity_interval=60 * 1000,
             )
         )
         .with_output_file_config(
@@ -288,10 +240,11 @@ def main():
 
     stream.add_sink(s3_sink).name("S3-Output")
 
-    # ── 7. Execute ──────────────────────────────────────────
+    # ── 6. Execute ──────────────────────────────────────────
     logger.info("Submitting Flink job: BankingLogProcessor")
     env.execute("BankingLogProcessor")
 
 
 if __name__ == "__main__":
     main()
+
