@@ -1,21 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Flink POC - Kinesis Stream + S3 Buckets + Managed Flink App
-  NO IAM resources in this template.
-  Uses the role ARN created by your existing flink-cf-template.yaml
-
-# ──────────────────────────────────────────────────────────────
-# IMPORTANT:
-# Before deploying this template, first deploy your working
-# flink-cf-template.yaml to create the IAM role.
-# Then get the role ARN and pass it as FlinkRoleArn below.
-#
-# Get role ARN after deploying flink-cf-template.yaml:
-#   aws cloudformation describe-stacks \
-#     --stack-name flink-iam-stack \
-#     --query "Stacks[0].Outputs[?OutputKey=='FlinkRoleArn'].OutputValue" \
-#     --output text
-# ──────────────────────────────────────────────────────────────
+  Flink POC - Kinesis Stream + Output S3 Bucket + Managed Flink App
+  Uses existing bucket flink-poc-app-nishikesh for app code and JARs.
+  No IAM resources.
 
 Parameters:
 
@@ -24,10 +11,12 @@ Parameters:
     Default: flink-poc
     Description: Name of the Flink application
 
-  BucketSuffix:
+  ExistingAppBucket:
     Type: String
-    Default: flink-poc
-    Description: Lowercase suffix for S3 bucket names
+    Default: flink-poc-app-nishikesh
+    Description: >
+      Your EXISTING S3 bucket where JARs and ZIP are already uploaded.
+      This bucket is NOT created by this template — it must already exist.
 
   LogRetentionDays:
     Type: Number
@@ -37,8 +26,8 @@ Parameters:
   FlinkRoleArn:
     Type: String
     Description: >
-      ARN of the IAM role created by your flink-cf-template.yaml.
-      Example: arn:aws:iam::739275465799:role/svc-flink-poc-role
+      ARN of the IAM role created by yugur.yaml (flink-iam-stack2).
+      Value: arn:aws:iam::739275465799:role/svc-bsp-msf-flink-role
 
 Resources:
 
@@ -55,27 +44,12 @@ Resources:
       LogGroupName: !Ref FlinkLogGroup
       LogStreamName: "flink-app-logs"
 
-  # ── S3 Bucket for App Code and JARs ──────────────────────────
-  # Upload main.py zip and JARs here
-  FlinkApplicationBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub '${AWS::AccountId}-${BucketSuffix}-app'
-      VersioningConfiguration:
-        Status: Enabled
-      LifecycleConfiguration:
-        Rules:
-          - Id: DeleteOldVersions
-            Status: Enabled
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 30
-
-  # ── S3 Bucket for Flink Output ────────────────────────────────
-  # Flink writes processed records here
+  # ── S3 Output Bucket ──────────────────────────────────────────
+  # Flink writes processed records here (new bucket, created by this template)
   FlinkOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${AWS::AccountId}-${BucketSuffix}-output'
+      BucketName: !Sub '${AWS::AccountId}-flink-poc-output'
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldLogs
@@ -83,7 +57,6 @@ Resources:
             ExpirationInDays: 30
 
   # ── Kinesis Input Stream ──────────────────────────────────────
-  # Python generator sends records here → Flink reads from here
   FlinkInputKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
@@ -96,12 +69,10 @@ Resources:
     Type: AWS::KinesisAnalyticsV2::Application
     DependsOn:
       - FlinkInputKinesisStream
-      - FlinkApplicationBucket
       - FlinkOutputBucket
     Properties:
       ApplicationName: !Sub '${ApplicationName}-app'
       RuntimeEnvironment: "FLINK-1_18"
-      # Uses role ARN from your existing flink-cf-template.yaml
       ServiceExecutionRole: !Ref FlinkRoleArn
 
       ApplicationConfiguration:
@@ -122,11 +93,11 @@ Resources:
             MetricsLevel: APPLICATION
             LogLevel: INFO
 
-        # Python ZIP + JARs in app bucket
+        # Points to your EXISTING bucket flink-poc-app-nishikesh
         ApplicationCodeConfiguration:
           CodeContent:
             S3ContentLocation:
-              BucketARN: !GetAtt FlinkApplicationBucket.Arn
+              BucketARN: !Sub 'arn:aws:s3:::${ExistingAppBucket}'
               FileKey: "python/flink-python-app.zip"
           CodeContentType: ZIPFILE
 
@@ -141,7 +112,7 @@ Resources:
             - PropertyGroupId: "ApplicationProperties"
               PropertyMap:
                 input.stream.name:  !Sub '${ApplicationName}-input-stream'
-                output.bucket.name: !Sub '${AWS::AccountId}-${BucketSuffix}-output'
+                output.bucket.name: !Sub '${AWS::AccountId}-flink-poc-output'
                 output.prefix:      "processed-logs"
                 aws.region:         !Ref "AWS::Region"
                 stream.position:    "LATEST"
@@ -156,14 +127,11 @@ Resources:
         LogStreamARN: !Sub >-
           arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}:log-stream:flink-app-logs
 
-# ──────────────────────────────────────────────────────────────
-# Outputs
-# ──────────────────────────────────────────────────────────────
 Outputs:
 
-  AppBucketName:
-    Description: Upload your main.py zip and JARs here
-    Value: !Ref FlinkApplicationBucket
+  ExistingAppBucket:
+    Description: Existing bucket used for app code and JARs
+    Value: !Ref ExistingAppBucket
 
   OutputBucketName:
     Description: Flink writes processed records here
