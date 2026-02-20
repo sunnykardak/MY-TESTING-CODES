@@ -1,0 +1,12 @@
+Next Steps
+1. Replace your main.py with the downloaded file above, then repackage zip:
+cmdcd C:\devhome\projects\working-flink-python\flink-app
+
+del flink-python-app.zip
+
+python -c "import zipfile; z=zipfile.ZipFile('flink-python-app.zip','w',zipfile.ZIP_DEFLATED); z.write('main.py'); z.write('jars/flink-sql-connector-kinesis-4.0.0-1.16.jar', 'flink-sql-connector-kinesis-4.0.0-1.16.jar'); z.close(); print(zipfile.ZipFile('flink-python-app.zip').namelist())"
+
+aws s3 cp flink-python-app.zip s3://flink-poc-app-nishikesh/python/flink-python-app.zip
+2. Create Kinesis input stream if not exists:
+cmdaws kinesis create-stream --stream-name flink-poc-nishikesh-input-stream --shard-count 1 --region eu-west-1
+3. Update the Flink app in Console → click "Update" → save → then Run.
