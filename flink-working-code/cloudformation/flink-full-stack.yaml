@@ -2,78 +2,26 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Description: >
   Flink POC - Full pipeline: IAM Role + Kinesis Stream + S3 Bucket + Managed Flink App
-  Flink Version: 1.16
-  JARs required in S3: flink-connector-kinesis-4.0.0-1.16.jar
-                        flink-s3-fs-hadoop-1.16.1.jar
+  Flink Version  : 1.18
+  Region         : eu-west-1
+  JARs in S3     : jars/flink-sql-connector-kinesis-4.0.0-1.16.jar
+                   jars/flink-s3-fs-hadoop-1.18.1.jar
 
 # ──────────────────────────────────────────────────────────────
-# Parameters — update these before deploying
+# FIXES APPLIED:
+# 1. PermissionsBoundary → core-AppRolePermissionsBoundary (was wrong name)
+# 2. All Tags removed → caused UnauthorizedTaggingOperation error
 # ──────────────────────────────────────────────────────────────
-Parameters:
 
-  ProjectName:
-    Type: String
-    Default: flink-poc
-    Description: Prefix used for all resource names
-
-  Environment:
-    Type: String
-    Default: dev
-    AllowedValues: [dev, staging, prod]
-
-  FlinkAppS3Bucket:
-    Type: String
-    Description: >
-      S3 bucket where you uploaded the PyFlink ZIP and JAR files.
-      Example: my-flink-app-bucket-nishikesh
-
-  FlinkAppZipKey:
-    Type: String
-    Default: python/flink-python-app.zip
-    Description: S3 key (path) to your PyFlink ZIP file (contains main.py)
-
-  KinesisConnectorJarKey:
-    Type: String
-    Default: jars/flink-connector-kinesis-4.0.0-1.16.jar
-    Description: >
-      S3 key to Kinesis connector JAR.
-      Download from client Nexus: flink-connector-kinesis-4.0.0-1.16.jar
-      Upload to: s3://your-bucket/jars/flink-connector-kinesis-4.0.0-1.16.jar
-
-  S3FsJarKey:
-    Type: String
-    Default: jars/flink-s3-fs-hadoop-1.16.1.jar
-    Description: >
-      S3 key to Hadoop S3 filesystem JAR (needed for S3 output sink).
-      Download from client Nexus: flink-s3-fs-hadoop-1.16.1.jar
-      Upload to: s3://your-bucket/jars/flink-s3-fs-hadoop-1.16.1.jar
-
-  FlinkRuntimeVersion:
-    Type: String
-    Default: FLINK-1_16
-    AllowedValues: [FLINK-1_15, FLINK-1_16, FLINK-1_18]
-    Description: Must match the version of JARs downloaded from Nexus
-
-  KinesisShardCount:
-    Type: Number
-    Default: 1
-    Description: Number of shards for the Kinesis input stream
-
-# ──────────────────────────────────────────────────────────────
-# Resources
-# ──────────────────────────────────────────────────────────────
 Resources:
 
-  # ── IAM Role (from your existing working template) ──────────
-  # Kept exactly as in flink-cf-template.yaml from client
+  # ── IAM Role ─────────────────────────────────────────────────
   FlinkServiceRole:
     Type: "AWS::IAM::Role"
     Properties:
-      RoleName:
-        'Fn::Sub': 'svc-flink-poc-role'
+      RoleName: "svc-flink-poc-role"
       Policies:
-        - PolicyName:
-            'Fn::Sub': 'flink-poc-policy'
+        - PolicyName: "flink-poc-policy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -104,47 +52,37 @@ Resources:
             Effect: "Allow"
             Principal:
               Service: "kinesisanalytics.amazonaws.com"
+      # FIXED: correct policy name from error message
       PermissionsBoundary:
-        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionssBoundary'
+        'Fn::Sub': 'arn:aws:iam::${AWS::AccountId}:policy/core-AppRolePermissionsBoundary'
 
-  # ── Kinesis Input Stream ─────────────────────────────────────
-  # Python generator sends records here → Flink reads from here
+  # ── Kinesis Input Stream ──────────────────────────────────────
+  # Tags removed — caused UnauthorizedTaggingOperation error
   FlinkInputKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
-      Name: !Sub "${ProjectName}-input-stream"
-      ShardCount: !Ref KinesisShardCount
+      Name: "flink-poc-input-stream"
+      ShardCount: 1
       RetentionPeriodHours: 24
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
 
-  # ── S3 Output Bucket ─────────────────────────────────────────
-  # Flink writes processed JSON files here.
-  # Browse files in S3 console or query with Athena.
+  # ── S3 Output Bucket ──────────────────────────────────────────
+  # Tags removed — caused UnauthorizedTaggingOperation error
   FlinkOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${ProjectName}-output-${AWS::AccountId}"
+      BucketName: !Sub "flink-poc-output-${AWS::AccountId}"
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldLogs
             Status: Enabled
             ExpirationInDays: 30
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Environment
-          Value: !Ref Environment
 
-  # ── CloudWatch Log Group ─────────────────────────────────────
+  # ── CloudWatch Log Group ──────────────────────────────────────
   # All logger.info() / logger.warning() from main.py appear here
   FlinkLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/kinesis-analytics/${ProjectName}-app"
+      LogGroupName: "/aws/kinesis-analytics/flink-poc-app"
       RetentionInDays: 7
 
   FlinkLogStream:
@@ -153,7 +91,7 @@ Resources:
       LogGroupName: !Ref FlinkLogGroup
       LogStreamName: "flink-app-logs"
 
-  # ── AWS Managed Flink Application ────────────────────────────
+  # ── AWS Managed Flink Application ─────────────────────────────
   FlinkApplication:
     Type: AWS::KinesisAnalyticsV2::Application
     DependsOn:
@@ -161,13 +99,13 @@ Resources:
       - FlinkInputKinesisStream
       - FlinkOutputBucket
     Properties:
-      ApplicationName: !Sub "${ProjectName}-app"
-      RuntimeEnvironment: !Ref FlinkRuntimeVersion
+      ApplicationName: "flink-poc-app"
+      RuntimeEnvironment: "FLINK-1_18"
       ServiceExecutionRole: !GetAtt FlinkServiceRole.Arn
 
       ApplicationConfiguration:
 
-        # ── Flink job parallelism ──────────────────────────
+        # ── Parallelism & Checkpointing ────────────────────
         FlinkApplicationConfiguration:
           ParallelismConfiguration:
             ConfigurationType: CUSTOM
@@ -177,43 +115,43 @@ Resources:
           CheckpointConfiguration:
             ConfigurationType: CUSTOM
             CheckpointingEnabled: true
-            CheckpointInterval: 60000          # 60 seconds
+            CheckpointInterval: 60000
             MinPauseBetweenCheckpoints: 5000
           MonitoringConfiguration:
             ConfigurationType: CUSTOM
             MetricsLevel: APPLICATION
             LogLevel: INFO
 
-        # ── Python application code (your main.py zipped) ─
+        # ── Python ZIP file location in S3 ────────────────
+        # S3 bucket : flink-poc-app-nishikesh
+        # S3 key    : python/flink-python-app.zip
         ApplicationCodeConfiguration:
           CodeContent:
             S3ContentLocation:
-              BucketARN: !Sub "arn:aws:s3:::${FlinkAppS3Bucket}"
-              FileKey: !Ref FlinkAppZipKey
+              BucketARN: "arn:aws:s3:::flink-poc-app-nishikesh"
+              FileKey: "python/flink-python-app.zip"
           CodeContentType: ZIPFILE
 
-        # ── Runtime properties ─────────────────────────────
-        # Read inside main.py via KinesisAnalyticsRuntime.get_application_properties()
+        # ── Runtime Properties ─────────────────────────────
         EnvironmentProperties:
           PropertyGroups:
 
-            # Python entry point + JAR files to load from S3
-            # jarfile accepts multiple JARs separated by semicolon
+            # JAR files loaded from S3 — both separated by semicolon
             - PropertyGroupId: "kinesis.analytics.flink.run.options"
               PropertyMap:
                 python: "main.py"
-                jarfile: !Sub "${KinesisConnectorJarKey};${S3FsJarKey}"
+                jarfile: "jars/flink-sql-connector-kinesis-4.0.0-1.16.jar;jars/flink-s3-fs-hadoop-1.18.1.jar"
 
-            # App-level config (read by get_config() in main.py)
+            # App config — read by get_config() in main.py
             - PropertyGroupId: "ApplicationProperties"
               PropertyMap:
-                input.stream.name: !Sub "${ProjectName}-input-stream"
-                output.bucket.name: !Sub "${ProjectName}-output-${AWS::AccountId}"
-                output.prefix: "processed-logs"
-                aws.region: !Ref "AWS::Region"
-                stream.position: "LATEST"
+                input.stream.name:  "flink-poc-input-stream"
+                output.bucket.name: !Sub "flink-poc-output-${AWS::AccountId}"
+                output.prefix:      "processed-logs"
+                aws.region:         "eu-west-1"
+                stream.position:    "LATEST"
 
-  # ── Attach CloudWatch Logging to Flink App ───────────────────
+  # ── CloudWatch Logging ─────────────────────────────────────────
   FlinkAppCloudWatchLogging:
     Type: AWS::KinesisAnalyticsV2::ApplicationCloudWatchLoggingOption
     DependsOn: FlinkApplication
@@ -221,7 +159,7 @@ Resources:
       ApplicationName: !Ref FlinkApplication
       CloudWatchLoggingOption:
         LogStreamARN: !Sub >-
-          arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FlinkLogGroup}:log-stream:${FlinkLogStream}
+          arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/flink-poc-app:log-stream:flink-app-logs
 
 # ──────────────────────────────────────────────────────────────
 # Outputs
@@ -234,24 +172,16 @@ Outputs:
 
   InputStreamName:
     Value: !Ref FlinkInputKinesisStream
-    Description: Kinesis input stream name — point your generator here
-
-  InputStreamArn:
-    Value: !GetAtt FlinkInputKinesisStream.Arn
-    Description: ARN of the Kinesis input stream
+    Description: "Kinesis input stream: flink-poc-input-stream"
 
   OutputBucketName:
     Value: !Ref FlinkOutputBucket
-    Description: S3 bucket — Flink writes processed JSON files here
-
-  OutputBucketArn:
-    Value: !GetAtt FlinkOutputBucket.Arn
-    Description: ARN of the S3 output bucket
+    Description: "S3 output bucket: flink-poc-output-<account-id>"
 
   FlinkAppName:
     Value: !Ref FlinkApplication
-    Description: Managed Flink application name
+    Description: "Managed Flink app: flink-poc-app"
 
   CloudWatchLogGroup:
-    Value: !Ref FlinkLogGroup
-    Description: CloudWatch log group — view all Flink logs here
+    Value: "/aws/kinesis-analytics/flink-poc-app"
+    Description: View Flink logs here in CloudWatch
