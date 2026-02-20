@@ -1,14 +1,20 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'IAM Role, Permissions, KMS Key, Kinesis Stream, S3 Bucket and Managed Apache Flink Application for POC'
+Description: >
+  Flink POC - Kinesis Stream + S3 Buckets + Managed Flink App
+  NO IAM resources in this template.
+  Uses the role ARN created by your existing flink-cf-template.yaml
 
 # ──────────────────────────────────────────────────────────────
-# Based on admin reference template (eugur.yaml) pattern
-# Key differences from previous attempts:
-# 1. RoleName removed → AWS auto-generates name (avoids tagging error)
-# 2. ManagedPolicy used instead of inline policy (admin pattern)
-# 3. KMS key added for encryption (admin pattern)
-# 4. PermissionsBoundary = core-ServiceRolePermissionsBoundary (from working template)
-# 5. Fine-grained permissions instead of wildcard *
+# IMPORTANT:
+# Before deploying this template, first deploy your working
+# flink-cf-template.yaml to create the IAM role.
+# Then get the role ARN and pass it as FlinkRoleArn below.
+#
+# Get role ARN after deploying flink-cf-template.yaml:
+#   aws cloudformation describe-stacks \
+#     --stack-name flink-iam-stack \
+#     --query "Stacks[0].Outputs[?OutputKey=='FlinkRoleArn'].OutputValue" \
+#     --output text
 # ──────────────────────────────────────────────────────────────
 
 Parameters:
@@ -21,81 +27,20 @@ Parameters:
   BucketSuffix:
     Type: String
     Default: flink-poc
-    Description: Lowercase bucket suffix for S3 buckets
+    Description: Lowercase suffix for S3 bucket names
 
   LogRetentionDays:
     Type: Number
     Default: 7
     AllowedValues: [ 1, 3, 5, 7, 14, 30, 60, 90 ]
-    Description: Number of days to retain logs
+
+  FlinkRoleArn:
+    Type: String
+    Description: >
+      ARN of the IAM role created by your flink-cf-template.yaml.
+      Example: arn:aws:iam::739275465799:role/svc-flink-poc-role
 
 Resources:
-
-  # ── KMS Key for encryption (admin pattern) ───────────────────
-  FlinkKMSKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub 'KMS key for ${ApplicationName} Flink application encryption'
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          # Root account access
-          - Sid: Enable IAM User Permissions
-            Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action: 'kms:*'
-            Resource: '*'
-
-          # Flink service access
-          - Sid: Allow Kinesis Analytics Service
-            Effect: Allow
-            Principal:
-              Service: kinesisanalytics.amazonaws.com
-            Action:
-              - 'kms:Decrypt'
-              - 'kms:GenerateDataKey'
-              - 'kms:CreateGrant'
-              - 'kms:ListGrants'
-              - 'kms:RetireGrant'
-              - 'kms:DescribeKey'
-            Resource: '*'
-            Condition:
-              StringEquals:
-                'kms:ViaService': !Sub 'kinesisanalytics.${AWS::Region}.amazonaws.com'
-
-          # CloudWatch Logs access
-          - Sid: Allow CloudWatch Logs
-            Effect: Allow
-            Principal:
-              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
-            Action:
-              - 'kms:Encrypt'
-              - 'kms:Decrypt'
-              - 'kms:ReEncrypt*'
-              - 'kms:GenerateDataKey*'
-              - 'kms:CreateGrant'
-              - 'kms:DescribeKey'
-            Resource: '*'
-
-          # S3 service access
-          - Sid: Allow S3 Service
-            Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action:
-              - 'kms:Decrypt'
-              - 'kms:GenerateDataKey'
-              - 'kms:DescribeKey'
-            Resource: '*'
-
-  # KMS Key Alias
-  FlinkKMSKeyAlias:
-    Type: AWS::KMS::Alias
-    Properties:
-      AliasName: !Sub 'alias/${ApplicationName}-key'
-      TargetKeyId: !Ref FlinkKMSKey
 
   # ── CloudWatch Log Group ──────────────────────────────────────
   FlinkLogGroup:
@@ -103,7 +48,6 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/kinesis-analytics/${ApplicationName}'
       RetentionInDays: !Ref LogRetentionDays
-      KmsKeyId: !GetAtt FlinkKMSKey.Arn
 
   FlinkLogStream:
     Type: AWS::Logs::LogStream
@@ -111,18 +55,12 @@ Resources:
       LogGroupName: !Ref FlinkLogGroup
       LogStreamName: "flink-app-logs"
 
-  # ── S3 Bucket for App Code, JARs and Output ──────────────────
-  # App bucket: stores main.py zip + JARs
+  # ── S3 Bucket for App Code and JARs ──────────────────────────
+  # Upload main.py zip and JARs here
   FlinkApplicationBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${AWS::AccountId}-${BucketSuffix}-app'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: 'aws:kms'
-              KMSMasterKeyID: !GetAtt FlinkKMSKey.Arn
-            BucketKeyEnabled: true
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
@@ -132,17 +70,12 @@ Resources:
             NoncurrentVersionExpiration:
               NoncurrentDays: 30
 
-  # Output bucket: Flink writes processed records here
+  # ── S3 Bucket for Flink Output ────────────────────────────────
+  # Flink writes processed records here
   FlinkOutputBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub '${AWS::AccountId}-${BucketSuffix}-output'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: 'aws:kms'
-              KMSMasterKeyID: !GetAtt FlinkKMSKey.Arn
-            BucketKeyEnabled: true
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldLogs
@@ -150,120 +83,26 @@ Resources:
             ExpirationInDays: 30
 
   # ── Kinesis Input Stream ──────────────────────────────────────
+  # Python generator sends records here → Flink reads from here
   FlinkInputKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
       Name: !Sub '${ApplicationName}-input-stream'
       ShardCount: 1
       RetentionPeriodHours: 24
-      StreamEncryption:
-        EncryptionType: KMS
-        KeyId: !Ref FlinkKMSKey
-
-  # ── IAM Policy for Flink (admin pattern — ManagedPolicy) ─────
-  FlinkApplicationPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Properties:
-      ManagedPolicyName: !Sub 'app-${ApplicationName}-flink-policy'
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-
-          # CloudWatch Logs permissions
-          - Sid: CloudWatchLogsAccess
-            Effect: Allow
-            Action:
-              - 'logs:CreateLogGroup'
-              - 'logs:CreateLogStream'
-              - 'logs:PutLogEvents'
-              - 'logs:DescribeLogGroups'
-              - 'logs:DescribeLogStreams'
-              - 'logs:GetLogEvents'
-              - 'logs:FilterLogEvents'
-              - 'logs:PutRetentionPolicy'
-              - 'logs:TagLogGroup'
-            Resource:
-              - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}*'
-
-          # Kinesis Data Streams permissions
-          - Sid: KinesisStreamsAccess
-            Effect: Allow
-            Action:
-              - 'kinesis:DescribeStream'
-              - 'kinesis:GetShardIterator'
-              - 'kinesis:GetRecords'
-              - 'kinesis:ListShards'
-              - 'kinesis:PutRecord'
-              - 'kinesis:PutRecords'
-            Resource:
-              - !Sub 'arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/*'
-
-          # S3 permissions for app code, JARs and output
-          - Sid: S3Access
-            Effect: Allow
-            Action:
-              - 's3:GetObject'
-              - 's3:GetObjectVersion'
-              - 's3:PutObject'
-              - 's3:DeleteObject'
-              - 's3:ListBucket'
-            Resource:
-              - !Sub 'arn:aws:s3:::${AWS::AccountId}-${BucketSuffix}-app'
-              - !Sub 'arn:aws:s3:::${AWS::AccountId}-${BucketSuffix}-app/*'
-              - !Sub 'arn:aws:s3:::${AWS::AccountId}-${BucketSuffix}-output'
-              - !Sub 'arn:aws:s3:::${AWS::AccountId}-${BucketSuffix}-output/*'
-
-          # KMS permissions
-          - Sid: KMSAccess
-            Effect: Allow
-            Action:
-              - 'kms:Decrypt'
-              - 'kms:DescribeKey'
-              - 'kms:GenerateDataKey'
-              - 'kms:CreateGrant'
-              - 'kms:RetireGrant'
-            Resource: '*'
-
-          # CloudWatch Metrics
-          - Sid: CloudWatchMetricsAccess
-            Effect: Allow
-            Action:
-              - 'cloudwatch:PutMetricData'
-            Resource: '*'
-
-  # ── IAM Role for Flink (NO RoleName = no tagging error) ──────
-  # Following admin pattern exactly:
-  # - No RoleName set (AWS auto-generates it)
-  # - Uses ManagedPolicy reference
-  # - Uses core-ServiceRolePermissionsBoundary (from your working template)
-  FlinkApplicationRole:
-    Type: AWS::IAM::Role
-    Properties:
-      # RoleName intentionally NOT set — avoids UnauthorizedTaggingOperation error
-      PermissionsBoundary: !Sub >-
-        arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: kinesisanalytics.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - !Ref FlinkApplicationPolicy
 
   # ── AWS Managed Flink Application ─────────────────────────────
   FlinkApplication:
     Type: AWS::KinesisAnalyticsV2::Application
     DependsOn:
-      - FlinkApplicationRole
       - FlinkInputKinesisStream
       - FlinkApplicationBucket
       - FlinkOutputBucket
     Properties:
       ApplicationName: !Sub '${ApplicationName}-app'
       RuntimeEnvironment: "FLINK-1_18"
-      ServiceExecutionRole: !GetAtt FlinkApplicationRole.Arn
+      # Uses role ARN from your existing flink-cf-template.yaml
+      ServiceExecutionRole: !Ref FlinkRoleArn
 
       ApplicationConfiguration:
 
@@ -283,7 +122,7 @@ Resources:
             MetricsLevel: APPLICATION
             LogLevel: INFO
 
-        # Python ZIP + JARs uploaded to app bucket
+        # Python ZIP + JARs in app bucket
         ApplicationCodeConfiguration:
           CodeContent:
             S3ContentLocation:
@@ -318,60 +157,26 @@ Resources:
           arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesis-analytics/${ApplicationName}:log-stream:flink-app-logs
 
 # ──────────────────────────────────────────────────────────────
-# Outputs (following admin pattern with Export)
+# Outputs
 # ──────────────────────────────────────────────────────────────
 Outputs:
 
-  FlinkApplicationRoleArn:
-    Description: ARN of the Flink Application IAM Role
-    Value: !GetAtt FlinkApplicationRole.Arn
-    Export:
-      Name: !Sub '${ApplicationName}-role-arn'
-
-  FlinkApplicationRoleName:
-    Description: Name of the Flink Application IAM Role
-    Value: !Ref FlinkApplicationRole
-    Export:
-      Name: !Sub '${ApplicationName}-role-name'
-
-  FlinkKMSKeyId:
-    Description: ID of the KMS key for Flink application
-    Value: !Ref FlinkKMSKey
-    Export:
-      Name: !Sub '${ApplicationName}-kms-key-id'
-
-  FlinkKMSKeyArn:
-    Description: ARN of the KMS key for Flink application
-    Value: !GetAtt FlinkKMSKey.Arn
-    Export:
-      Name: !Sub '${ApplicationName}-kms-key-arn'
-
-  FlinkLogGroupName:
-    Description: Name of the CloudWatch Log Group
-    Value: !Ref FlinkLogGroup
-    Export:
-      Name: !Sub '${ApplicationName}-log-group-name'
-
-  FlinkApplicationBucketName:
-    Description: S3 bucket for app code and JARs
+  AppBucketName:
+    Description: Upload your main.py zip and JARs here
     Value: !Ref FlinkApplicationBucket
-    Export:
-      Name: !Sub '${ApplicationName}-application-bucket'
 
-  FlinkOutputBucketName:
-    Description: S3 bucket for Flink output records
+  OutputBucketName:
+    Description: Flink writes processed records here
     Value: !Ref FlinkOutputBucket
-    Export:
-      Name: !Sub '${ApplicationName}-output-bucket'
 
   InputStreamName:
-    Description: Kinesis input stream name
+    Description: Send records here from the generator
     Value: !Ref FlinkInputKinesisStream
-    Export:
-      Name: !Sub '${ApplicationName}-input-stream'
 
   FlinkAppName:
     Description: Managed Flink application name
     Value: !Ref FlinkApplication
-    Export:
-      Name: !Sub '${ApplicationName}-app-name'
+
+  CloudWatchLogGroup:
+    Description: View Flink logs here
+    Value: !Ref FlinkLogGroup
