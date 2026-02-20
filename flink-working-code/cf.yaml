@@ -1,0 +1,13 @@
+aws cloudformation deploy `
+  --template-file cloudformation/flink-full-stack.yaml `
+  --stack-name flink-poc-stack `
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND `
+  --region ap-south-1 `
+  --parameter-overrides `
+      ProjectName=flink-poc `
+      Environment=dev `
+      FlinkAppS3Bucket=$APP_BUCKET `
+      FlinkAppZipKey=python/flink-python-app.zip `
+      KinesisConnectorJarKey=jars/flink-sql-connector-kinesis-4.0.0-1.16.jar `
+      S3FsJarKey=jars/flink-s3-fs-hadoop-1.18.1.jar `
+      FlinkRuntimeVersion=FLINK-1_18
