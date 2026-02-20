@@ -1,0 +1,56 @@
+[System.IO.Compression.ZipFile]::OpenRead("flink-python-app.zip").Entries | Select-Object FullName
+```
+
+---
+
+## Common Problem
+
+`Compress-Archive` sometimes creates a **nested folder** inside the zip like:
+```
+# Wrong - nested
+flink-python-app/jars/flink-sql-connector-kinesis-4.0.0-1.16.jar
+
+# Also wrong - flat
+jars/flink-sql-connector-kinesis-4.0.0-1.16.jar  ✓ (this looks right)
+```
+
+Flink expects exactly `jars/filename.jar` at the **root level** of the zip.
+
+---
+
+## Also Check Your CloudFormation Template
+
+The error message shows the jar path as a semicolon-separated string:
+```
+jars/flink-sql-connector-kinesis-4.0.0-1.16.jar;jars/flink-s3-fs-hadoop-1.18.1.jar
+
+
+
+
+
+
+
+--------------------
+
+# It likely looks like this:
+DependencyJars: "jars/flink-sql-connector-kinesis-4.0.0-1.16.jar;jars/flink-s3-fs-hadoop-1.18.1.jar"
+
+
+
+---------------------
+
+
+# Go into your project folder
+cd C:\devhome\projects\working-flink-python
+
+# Delete old zip
+Remove-Item flink-python-app.zip -ErrorAction SilentlyContinue
+
+# Make sure jars folder exists with files
+ls jars\
+
+# Create zip from inside the folder so paths are correct
+Compress-Archive -Path @("main.py", "jars") -DestinationPath flink-python-app.zip
+
+# Verify structure - should show jars/xxx.jar NOT flink-python-app/jars/xxx.jar
+[System.IO.Compression.ZipFile]::OpenRead("flink-python-app.zip").Entries | Select-Object FullName
