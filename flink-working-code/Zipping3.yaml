@@ -1,0 +1,5 @@
+cd C:\devhome\projects\working-flink-python\flink-app
+
+del flink-python-app.zip
+
+python -c "import zipfile; z=zipfile.ZipFile('flink-python-app.zip','w',zipfile.ZIP_DEFLATED); z.write('main.py'); z.write('jars/flink-sql-connector-kinesis-4.0.0-1.16.jar', 'flink-sql-connector-kinesis-4.0.0-1.16.jar'); z.close(); print(zipfile.ZipFile('flink-python-app.zip').namelist())"
