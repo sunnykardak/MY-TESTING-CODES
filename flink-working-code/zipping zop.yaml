@@ -1,0 +1,21 @@
+echo import zipfile, os > makezip.py
+echo z = zipfile.ZipFile('flink-python-app.zip', 'w', zipfile.ZIP_DEFLATED) >> makezip.py
+echo z.write('main.py') >> makezip.py
+echo for f in os.listdir('jars'): z.write(os.path.join('jars', f), 'jars/' + f) >> makezip.py
+echo z.close() >> makezip.py
+echo print('Done! Files:', zipfile.ZipFile('flink-python-app.zip').namelist()) >> makezip.py
+
+python makezip.py
+
+
+
+
+aws s3 cp flink-python-app.zip s3://flink-poc-app-nishikesh/python/flink-python-app.zip
+
+
+cd C:\devhome\projects\working-flink-python\flink-app
+
+del flink-python-app.zip
+
+
+
