@@ -11,3 +11,37 @@ aws cloudformation deploy `
       KinesisConnectorJarKey=jars/flink-sql-connector-kinesis-4.0.0-1.16.jar `
       S3FsJarKey=jars/flink-s3-fs-hadoop-1.18.1.jar `
       FlinkRuntimeVersion=FLINK-1_18
+
+
+
+
+Deploy Command
+powershell# Delete old broken stack first
+aws cloudformation delete-stack `
+  --stack-name flink-poc-stack `
+  --region eu-west-1
+
+# Wait until deleted, then deploy
+aws cloudformation deploy `
+  --template-file cloudformation/flink-full-stack.yaml `
+  --stack-name flink-poc-stack `
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND `
+  --region eu-west-1 `
+  --parameter-overrides `
+      ApplicationName=flink-poc `
+      BucketSuffix=flink-poc `
+      LogRetentionDays=7
+After Deploy — Upload Your Files
+The template creates a new app bucket named <account-id>-flink-poc-app. Upload your files there:
+powershell$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+
+# Upload JARs
+aws s3 cp jars/flink-sql-connector-kinesis-4.0.0-1.16.jar `
+    s3://$ACCOUNT_ID-flink-poc-app/jars/flink-sql-connector-kinesis-4.0.0-1.16.jar
+
+aws s3 cp jars/flink-s3-fs-hadoop-1.18.1.jar `
+    s3://$ACCOUNT_ID-flink-poc-app/jars/flink-s3-fs-hadoop-1.18.1.jar
+
+# Upload zipped main.py
+aws s3 cp flink-app/flink-python-app.zip `
+    s3://$ACCOUNT_ID-flink-poc-app/python/flink-python-app.zip
