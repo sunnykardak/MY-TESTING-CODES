@@ -1,0 +1,119 @@
+Perfect! Now I have all the details. Let me give you the exact code:
+Step 1: Test Connection First
+Create test_bsp_kafka.py in C:\devhome\projects\working-flink-python:
+pythonfrom confluent_kafka import Consumer, KafkaException
+
+conf = {
+    "bootstrap.servers": "kafka.bsp.buk.4218508845486.aws.intranet:9092",
+    "group.id": "nishikesh-test-consumer-001",
+    "security.protocol": "SSL",
+    
+    # Truststore
+    "ssl.ca.location": "root_ca.crt",  # using your root CA
+    
+    # Keystore (your client cert + key)
+    "ssl.certificate.location": "tls.crt",
+    "ssl.key.location": "tls.key",
+    "ssl.key.password": "1122",  # your keystore password
+    
+    "auto.offset.reset": "earliest",
+    "session.timeout.ms": 15000,
+}
+
+print("Connecting to BSP Kafka...")
+
+try:
+    consumer = Consumer(conf)
+    consumer.subscribe(["buk-sdwh-digital-poc"])
+    print("Subscribed! Waiting for messages...")
+    
+    count = 0
+    while count < 5:
+        msg = consumer.poll(timeout=10.0)
+        if msg is None:
+            print("Waiting...")
+            continue
+        if msg.error():
+            print(f"Error: {msg.error()}")
+            break
+        else:
+            print(f"Message {count+1}: {msg.value().decode('utf-8')[:300]}")
+            count += 1
+
+except KafkaException as e:
+    print(f"Connection failed: {e}")
+finally:
+    consumer.close()
+Run:
+cmdcd C:\devhome\projects\working-flink-python
+pip install confluent-kafka
+python test_bsp_kafka.py
+
+If Above Fails — Try with chain cert instead of root:
+pythonconf = {
+    "bootstrap.servers": "kafka.bsp.buk.4218508845486.aws.intranet:9092",
+    "group.id": "nishikesh-test-consumer-001",
+    "security.protocol": "SSL",
+    
+    # Try intermediate CA instead
+    "ssl.ca.location": "intermediate_ca.crt",
+    
+    "ssl.certificate.location": "tls.crt",
+    "ssl.key.location": "tls.key",
+    "ssl.key.password": "1122",
+    
+    "auto.offset.reset": "earliest",
+}
+
+Step 2: Once Connected — PyFlink Code
+Once the test works, use this for your Flink job:
+pythonfrom pyflink.datastream import StreamExecutionEnvironment
+from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer
+from pyflink.common.serialization import SimpleStringSchema
+import os
+
+BASE = r"C:\devhome\projects\working-flink-python"
+
+def main():
+    env = StreamExecutionEnvironment.get_execution_environment()
+    env.set_parallelism(1)
+    
+    # Add Kafka JAR
+    env.add_jars(
+        f"file:///{BASE}/jars/flink-sql-connector-kafka-1.17.2.jar"
+    )
+    
+    kafka_props = {
+        "bootstrap.servers": "kafka.bsp.buk.4218508845486.aws.intranet:9092",
+        "group.id": "flink-buk-consumer-001",
+        
+        # SSL with PKCS12
+        "security.protocol": "SSL",
+        "ssl.truststore.type": "PKCS12",
+        "ssl.truststore.location": f"{BASE}/truststore.p12",
+        "ssl.truststore.password": "112233",  # your truststore password
+        
+        "ssl.keystore.type": "PKCS12",
+        "ssl.keystore.location": f"{BASE}/keystore.p12",
+        "ssl.keystore.password": "1122",      # your keystore password
+        "ssl.key.password": "1122",
+        
+        "auto.offset.reset": "earliest",
+    }
+    
+    consumer = FlinkKafkaConsumer(
+        topics="buk-sdwh-digital-poc",
+        deserialization_schema=SimpleStringSchema(),
+        properties=kafka_props
+    )
+    consumer.set_start_from_earliest()
+    
+    stream = env.add_source(consumer)
+    stream.print()
+    
+    env.execute("BSP Kafka Flink POC")
+
+if __name__ == "__main__":
+    main()
+
+Please run Step 1 first and share the output — whether it connects or gives an error. That will tell us exactly what to fix next!
