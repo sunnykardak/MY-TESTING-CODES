@@ -1,6 +1,6 @@
 import socket
 
-# Fix DNS resolution in Command Prompt
+# Fix DNS resolution
 _original_getaddrinfo = socket.getaddrinfo
 def _custom_getaddrinfo(host, port, *args, **kwargs):
     if "kafka.bsp.buk" in str(host):
@@ -10,20 +10,20 @@ socket.getaddrinfo = _custom_getaddrinfo
 
 from confluent_kafka import Consumer, KafkaException
 
+# Full paths to certificate files
+BASE = r"C:\devhome\projects\working-flink-python"
+
 conf = {
     "bootstrap.servers": "kafka.bsp.buk.421850845486.aws.intranet:9092",
     "group.id": "nishikesh-test-consumer-001",
     "security.protocol": "SSL",
     
-    # Certificate files
-    "ssl.ca.location": "root_ca.crt",
-    "ssl.certificate.location": "tls.crt",
-    "ssl.key.location": "tls.key",
+    "ssl.ca.location": f"{BASE}\\root_ca.crt",
+    "ssl.certificate.location": f"{BASE}\\tls.crt",
+    "ssl.key.location": f"{BASE}\\tls.key",
     "ssl.key.password": "1122",
     
-    # Disable hostname verification since we use IP
     "ssl.endpoint.identification.algorithm": "none",
-    
     "auto.offset.reset": "earliest",
     "session.timeout.ms": 15000,
     "request.timeout.ms": 20000,
@@ -56,10 +56,10 @@ except KafkaException as e:
 except Exception as e:
     print(f"Unexpected error: {e}")
 finally:
-    consumer.close()
+    try:
+        consumer.close()
+    except:
+        pass
     print("Done.")
 
-
-
 & "C:\devhome\tools\python3.9\current\python.exe" "C:\devhome\projects\working-flink-python\test_bsp_kafka.py"
-
