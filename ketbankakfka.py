@@ -54,3 +54,6 @@ finally:
     except:
         pass
     print("Done.")
+
+
+& "C:\devhome\tools\python3.9\current\python.exe" "C:\devhome\projects\working-flink-python\test_bsp_kafka.py"
