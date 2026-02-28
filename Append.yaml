@@ -1,0 +1,10 @@
+          - Sid: StudioVPCExtendedAccess
+            Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterfacePermission
+              - ec2:DescribeDhcpOptions
+              - ec2:DescribeRouteTables
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeVpcEndpoints
+              - ec2:DescribeAvailabilityZones
+            Resource: "*"
