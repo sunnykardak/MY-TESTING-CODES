@@ -1,0 +1,90 @@
+  # ==========================================================
+  # IAM Role for Flink Studio Notebook
+  # ==========================================================
+
+  FlinkStudioRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'svc-${ApplicationName}-studio-role'
+      PermissionsBoundary: !Sub arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: kinesisanalytics.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref FlinkStudioPolicy
+
+  FlinkStudioPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'app-${ApplicationName}-studio-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # S3 Access (same bucket you already created)
+          - Sid: StudioS3Access
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !Sub 'arn:aws:s3:::${FlinkApplicationBucket}'
+              - !Sub 'arn:aws:s3:::${FlinkApplicationBucket}/*'
+
+          # CloudWatch Logs
+          - Sid: StudioLogsAccess
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: "*"
+
+          # Glue (required for Studio)
+          - Sid: GlueAccess
+            Effect: Allow
+            Action:
+              - glue:GetDatabase
+              - glue:GetDatabases
+              - glue:GetTable
+              - glue:GetTables
+              - glue:CreateTable
+              - glue:UpdateTable
+            Resource: "*"
+
+          # VPC Access
+          - Sid: StudioVPCAccess
+            Effect: Allow
+            Action:
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:CreateNetworkInterface
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+            Resource: "*"
+
+          # KMS Access
+          - Sid: StudioKMSAccess
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:CreateGrant
+            Resource: "*"
+
+          # Allow PassRole
+          - Sid: AllowPassRole
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: "*"
