@@ -88,3 +88,13 @@
             Action:
               - iam:PassRole
             Resource: "*"
+
+
+
+
+
+              FlinkStudioRoleArn:
+    Description: ARN of the Flink Studio IAM Role
+    Value: !GetAtt FlinkStudioRole.Arn
+    Export:
+      Name: !Sub '${ApplicationName}-studio-role-arn'
