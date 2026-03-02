@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 instance to test Kafka connectivity from Flink VPC
+
+Parameters:
+  KeyName:
+    Description: Existing EC2 KeyPair name
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+  KafkaNetworkTestInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0c1c30571d2dae5c9   # Amazon Linux 2 - eu-west-1
+      KeyName: !Ref KeyName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: subnet-0cddb06678a20d32f
+          GroupSet:
+            - sg-0ac8dfc095eb5a903
+      Tags:
+        - Key: Name
+          Value: kafka-network-test
+
+Outputs:
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref KafkaNetworkTestInstance
+
+  PublicIP:
+    Description: Public IP of EC2 instance
+    Value: !GetAtt KafkaNetworkTestInstance.PublicIp
