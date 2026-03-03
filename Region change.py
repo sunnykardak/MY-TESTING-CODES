@@ -1,0 +1,84 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+ http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+ <modelVersion>4.0.0</modelVersion>
+ <groupId>com.test</groupId>
+ <artifactId>flink-access-test</artifactId>
+ <version>1.0</version>
+
+ <properties>
+   <maven.compiler.source>11</maven.compiler.source>
+   <maven.compiler.target>11</maven.compiler.target>
+ </properties>
+
+ <dependencies>
+
+   <!-- Flink provided by runtime -->
+   <dependency>
+     <groupId>org.apache.flink</groupId>
+     <artifactId>flink-streaming-java</artifactId>
+     <version>1.18.0</version>
+     <scope>provided</scope>
+   </dependency>
+
+   <!-- AWS SDK BOM -->
+   <dependency>
+     <groupId>software.amazon.awssdk</groupId>
+     <artifactId>bom</artifactId>
+     <version>2.25.20</version>
+     <type>pom</type>
+     <scope>import</scope>
+   </dependency>
+
+   <dependency>
+     <groupId>software.amazon.awssdk</groupId>
+     <artifactId>sts</artifactId>
+   </dependency>
+
+   <dependency>
+     <groupId>software.amazon.awssdk</groupId>
+     <artifactId>glue</artifactId>
+   </dependency>
+
+ </dependencies>
+
+ <build>
+   <plugins>
+
+     <plugin>
+       <groupId>org.apache.maven.plugins</groupId>
+       <artifactId>maven-compiler-plugin</artifactId>
+       <version>3.11.0</version>
+       <configuration>
+         <release>11</release>
+       </configuration>
+     </plugin>
+
+     <plugin>
+       <groupId>org.apache.maven.plugins</groupId>
+       <artifactId>maven-shade-plugin</artifactId>
+       <version>3.4.1</version>
+       <executions>
+         <execution>
+           <phase>package</phase>
+           <goals>
+             <goal>shade</goal>
+           </goals>
+           <configuration>
+             <createDependencyReducedPom>false</createDependencyReducedPom>
+             <transformers>
+               <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                 <mainClass>com.test.App</mainClass>
+               </transformer>
+             </transformers>
+           </configuration>
+         </execution>
+       </executions>
+     </plugin>
+
+   </plugins>
+ </build>
+
+</project>
