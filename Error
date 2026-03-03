@@ -1,0 +1,4 @@
+An error occurred (AccessDenied) when calling the AssumeRole operation:
+User: arn:aws:sts::739275465799:assumed-role/App-Developer-fGLBAWSDDPConsDevUAT/<session>
+is not authorized to perform: sts:AssumeRole
+on resource: arn:aws:iam::739275465799:role/svc-role-real-time-transformation-poc
