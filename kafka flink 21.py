@@ -42,3 +42,18 @@ def connect_via_athena():
         print(f"Connection failed: {e}")
 
 connect_via_athena()
+
+
+#-----------------------------------------------------------------------
+
+import boto3
+# This confirms what identity Flink is currently using
+print(boto3.client('sts').get_caller_identity())
+
+# This tests if you can actually "switch" to the data role
+sts = boto3.client('sts')
+response = sts.assume_role(
+    RoleArn="arn:aws:iam::123456789012:role/DataProductAccessRole",
+    RoleSessionName="TestingAccess"
+)
+print("AssumeRole Successful!")
