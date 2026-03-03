@@ -57,3 +57,17 @@ response = sts.assume_role(
     RoleSessionName="TestingAccess"
 )
 print("AssumeRole Successful!")
+
+
+
+
+#------------------------------------------------------------------------
+
+
+
+
+# i was trying to find out the details for jdbc connectivity via Athena, it seems we would require Amazon Athena driver, whcih AWS provides and need to download and install. One of the connector file is below and other AWS Athena details are provided in the link below.
+
+# https://docs.aws.amazon.com/athena/latest/ug/jdbc-v2.html
+# flink-connector-jdbc-3.3.0-1.20
+
