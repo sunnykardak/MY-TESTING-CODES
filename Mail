@@ -1,0 +1,16 @@
+Hi [Lead Name],
+
+I wanted to share a quick update on the Kafka–Flink connectivity testing.
+
+I am able to successfully produce and consume messages to the BSP Kafka topic buk-sdwh-digital-poc from the DEV CLI, and offsets are increasing, which confirms that the Kafka cluster and topic are working correctly.
+
+The Managed Flink application has been deployed successfully and is running without errors. However, in the Flink dashboard the metrics show Bytes Received = 0 and Records Received = 0, indicating that the application is not receiving data from Kafka.
+
+After reviewing the setup, it appears that the Flink application is running in a VPC with CIDR 28.54.x.x, while the Kafka broker is in the 28.45.x.x network. Because of this, the Flink application may not have a valid network path to the Kafka broker on port 9092.
+
+It seems likely that this is a VPC routing or firewall connectivity issue rather than a code or configuration problem.
+
+Could we please confirm whether routing between these networks (via Transit Gateway/VPN) and port 9092 access from the Flink VPC is enabled?
+
+Thanks,  
+Nishikesh
