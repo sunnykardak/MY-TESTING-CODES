@@ -1,0 +1,12 @@
+I am trying to validate access to the FDP database fdk_uk_customer_db_iceberg using the IAM role svc-role-real-time-transformation-poc from an AWS Managed Flink application.
+
+Initially, I attempted to assume the role via CLI using sts assume-role, but received an AccessDenied error since the role trust policy allows only AWS services to assume it. Therefore, I created a test Flink application to validate the access programmatically.
+
+I built a minimal Java Flink job that prints the STS caller identity and attempts to access the Glue database. The application was compiled using Java 11 and packaged as a shaded JAR via Maven, then uploaded to S3 and configured in the Flink application in eu-west-1.
+
+However, when starting the application, it fails during startup with the error:
+org.apache.flink.runtime.rest.handler.RestHandlerException: Could not execute application.
+
+I also verified the job structure and dependencies and checked CloudWatch logs, but it appears the job fails before the code execution begins.
+
+Could you please advise if there are any additional configuration requirements or a recommended approach to validate access to the FDP database using this role?
