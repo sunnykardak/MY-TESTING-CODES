@@ -31,7 +31,7 @@
     </dependencyManagement>
 
     <dependencies>
-        <!-- ========== Flink Core (PROVIDED - already on Managed Flink runtime) ========== -->
+        <!-- ========== Flink Core (PROVIDED) ========== -->
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-streaming-java</artifactId>
@@ -46,7 +46,7 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- ========== AWS SDK v2 - Only Glue and STS ========== -->
+        <!-- ========== AWS SDK v2 ========== -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>glue</artifactId>
@@ -62,7 +62,20 @@
             <artifactId>cloudwatchlogs</artifactId>
         </dependency>
 
-        <!-- ========== SLF4J (PROVIDED - Flink runtime has it) ========== -->
+        <!-- CRITICAL: Explicit HTTP client - AWS SDK v2 needs this -->
+        <!-- url-connection-client is lightweight, no Netty conflicts -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
+
+        <!-- Explicit: AWS SDK core dependencies that must be in JAR -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+        </dependency>
+
+        <!-- ========== SLF4J (PROVIDED) ========== -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
@@ -73,7 +86,6 @@
 
     <build>
         <plugins>
-            <!-- Compiler Plugin - Java 11 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -84,7 +96,6 @@
                 </configuration>
             </plugin>
 
-            <!-- Shade Plugin - Creates fat JAR with AWS SDK bundled -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -97,13 +108,21 @@
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+
+                            <!-- NO relocations - they break META-INF/services discovery -->
+
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.barclays.flink.GlueAccessTest</mainClass>
                                 </transformer>
-                                <!-- Required: merge META-INF/services files -->
+                                <!-- CRITICAL: Merge all META-INF/services files -->
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- Merge META-INF/io.netty.versions.properties if present -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/io.netty.versions.properties</resource>
+                                </transformer>
                             </transformers>
+
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -111,16 +130,12 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/DEPENDENCIES</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
-                            <relocations>
-                                <!-- Relocate AWS SDK to avoid classpath conflicts with Flink runtime -->
-                                <relocation>
-                                    <pattern>software.amazon.awssdk</pattern>
-                                    <shadedPattern>shaded.software.amazon.awssdk</shadedPattern>
-                                </relocation>
-                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
