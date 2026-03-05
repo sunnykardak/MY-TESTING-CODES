@@ -1,240 +1,280 @@
-package com.barclays.flink;
+package com.barclays.poc;
 
-import org.apache.flink.api.common.functions.MapFunction;
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
-import software.amazon.awssdk.services.cloudwatchlogs.model.CreateLogStreamRequest;
-import software.amazon.awssdk.services.cloudwatchlogs.model.InputLogEvent;
-import software.amazon.awssdk.services.cloudwatchlogs.model.PutLogEventsRequest;
-import software.amazon.awssdk.services.cloudwatchlogs.model.ResourceAlreadyExistsException;
 import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.glue.model.GetDatabaseRequest;
 import software.amazon.awssdk.services.glue.model.GetDatabaseResponse;
 import software.amazon.awssdk.services.glue.model.GetTablesRequest;
 import software.amazon.awssdk.services.glue.model.GetTablesResponse;
 import software.amazon.awssdk.services.glue.model.Table;
-import software.amazon.awssdk.services.sts.StsClient;
-import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
-import java.util.List;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
 /**
- * Flink app to test Glue database access via service role.
- * Uses UrlConnectionHttpClient explicitly (no service discovery needed).
- * Writes results directly to CloudWatch Logs.
+ * GlueTableLister - List all tables in the cross-account Glue database
+ *
+ * This Flink app runs as svc-role-real-time-transformation-poc which has:
+ *   - glue:Get*, glue:SearchTables, glue:List* on Resource: "*"
+ *   - Trust policy allows kinesisanalytics.amazonaws.com (Managed Flink)
+ *
+ * It connects to the Glue catalog in account 767397940910 and lists
+ * all tables in fdk_uk_customer_db_iceberg (or fdp_uk_customer_db_iceberg).
+ *
+ * Output goes to:
+ *   1. CloudWatch Logs (via LOG.info)
+ *   2. S3 file (as a backup if CloudWatch logging has issues)
  */
-public class GlueAccessTest {
+public class GlueTableLister {
 
-    private static final Logger LOG = LoggerFactory.getLogger(GlueAccessTest.class);
+    private static final Logger LOG = LoggerFactory.getLogger(GlueTableLister.class);
 
-    private static final String DATABASE_NAME = "fdk_uk_customer_db_iceberg";
+    // ========================================================================
+    // CONFIGURATION - UPDATE THESE
+    // ========================================================================
+
+    // The AWS Account ID that owns the Glue catalog (the other account)
+    private static final String CATALOG_ID = "767397940910";
+
+    // Region
     private static final String REGION = "eu-west-1";
-    private static final String CATALOG_ID = null; // Set to 12-digit account ID if cross-account
-    private static final String LOG_GROUP = "/aws/kinesis-analytics/DB-testing-app";
-    private static final String LOG_STREAM = "glue-access-test-output";
+
+    // The database name - TRY BOTH if one fails:
+    //   "fdk_uk_customer_db_iceberg"  (original name you were given)
+    //   "fdp_uk_customer_db_iceberg"  (what appeared in your Athena query)
+    private static final String DATABASE_NAME = "fdk_uk_customer_db_iceberg";
+
+    // S3 path to write results as backup (in case CloudWatch logs aren't visible)
+    private static final String S3_OUTPUT_BUCKET = "flink-poc-app-nishikesh";
+    private static final String S3_OUTPUT_KEY = "output/glue-table-list-result.txt";
+
+    // ========================================================================
 
     public static void main(String[] args) throws Exception {
-        LOG.info("=== GLUE ACCESS TEST STARTING ===");
 
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        LOG.info("====================================================");
+        LOG.info("  GLUE TABLE LISTER - Cross Account Access POC");
+        LOG.info("====================================================");
+        LOG.info("Catalog ID (Account): {}", CATALOG_ID);
+        LOG.info("Region: {}", REGION);
+        LOG.info("Database: {}", DATABASE_NAME);
 
-        DataStream<String> source = env.fromElements("RUN_ALL_TESTS");
-        DataStream<String> results = source.map(new GlueTestMapper());
-        results.print();
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
 
-        env.execute("Glue-Access-Test-Job");
+        // Add a source that does the Glue lookup
+        env.addSource(new GlueTableListerSource(CATALOG_ID, REGION, DATABASE_NAME,
+                S3_OUTPUT_BUCKET, S3_OUTPUT_KEY))
+            .name("GlueTableLister")
+            .print();  // This sends output to taskmanager stdout/CloudWatch
+
+        env.execute("Glue-Table-Lister-POC");
     }
 
-    public static class GlueTestMapper implements MapFunction<String, String> {
+    /**
+     * A Flink source that queries the Glue catalog and emits table info as strings.
+     * Using a Source so Flink has a valid job graph (required for Managed Flink).
+     */
+    public static class GlueTableListerSource extends RichSourceFunction<String> {
 
-        private static final Logger LOG = LoggerFactory.getLogger(GlueTestMapper.class);
+        private static final Logger LOG = LoggerFactory.getLogger(GlueTableListerSource.class);
+
+        private final String catalogId;
+        private final String region;
+        private final String databaseName;
+        private final String s3Bucket;
+        private final String s3Key;
+
+        public GlueTableListerSource(String catalogId, String region, String databaseName,
+                                     String s3Bucket, String s3Key) {
+            this.catalogId = catalogId;
+            this.region = region;
+            this.databaseName = databaseName;
+            this.s3Bucket = s3Bucket;
+            this.s3Key = s3Key;
+        }
 
         @Override
-        public String map(String trigger) throws Exception {
-            List<String> messages = new ArrayList<>();
+        public void run(SourceContext<String> ctx) throws Exception {
 
-            messages.add("====================================================");
-            messages.add("  GLUE ACCESS TEST - STARTED");
-            messages.add("  Database:  " + DATABASE_NAME);
-            messages.add("  Region:    " + REGION);
-            messages.add("  CatalogId: " + (CATALOG_ID != null ? CATALOG_ID : "default"));
-            messages.add("  Time:      " + java.time.Instant.now().toString());
-            messages.add("====================================================");
+            StringBuilder report = new StringBuilder();
 
-            // Test 1: STS
-            messages.add("");
-            messages.add("--- TEST 1: STS GetCallerIdentity ---");
             try {
-                testSts(messages);
-            } catch (Exception e) {
-                messages.add("  FAILED: " + e.getClass().getName() + ": " + e.getMessage());
-            }
+                // Build Glue client - uses UrlConnectionHttpClient to avoid
+                // classloader issues with Managed Flink (same fix as your earlier POC)
+                GlueClient glueClient = GlueClient.builder()
+                        .region(Region.of(region))
+                        .httpClient(UrlConnectionHttpClient.builder().build())
+                        .build();
 
-            // Test 2: Glue GetDatabase
-            messages.add("");
-            messages.add("--- TEST 2: Glue GetDatabase ---");
-            try {
-                testGlueDatabase(messages);
-            } catch (Exception e) {
-                messages.add("  FAILED: " + e.getClass().getName() + ": " + e.getMessage());
-            }
+                // --------------------------------------------------------
+                // STEP 1: Verify database exists
+                // --------------------------------------------------------
+                String msg = "=== Step 1: Checking database '" + databaseName +
+                        "' in catalog " + catalogId + " ===";
+                LOG.info(msg);
+                report.append(msg).append("\n");
 
-            // Test 3: Glue GetTables
-            messages.add("");
-            messages.add("--- TEST 3: Glue GetTables ---");
-            try {
-                testGlueTables(messages);
-            } catch (Exception e) {
-                messages.add("  FAILED: " + e.getClass().getName() + ": " + e.getMessage());
-            }
-
-            messages.add("");
-            messages.add("=== ALL TESTS COMPLETED ===");
-
-            // Write to CloudWatch
-            try {
-                writeToCloudWatch(messages);
-                messages.add(">> Written to: " + LOG_GROUP + " / " + LOG_STREAM);
-            } catch (Exception e) {
-                messages.add(">> CloudWatch write FAILED: " + e.getClass().getName() + ": " + e.getMessage());
-            }
-
-            String output = String.join("\n", messages);
-            System.out.println(output);
-            return output;
-        }
-
-        private void testSts(List<String> msg) {
-            // Explicitly use UrlConnectionHttpClient - no service discovery
-            StsClient client = StsClient.builder()
-                    .region(Region.of(REGION))
-                    .httpClient(UrlConnectionHttpClient.builder().build())
-                    .build();
-            try {
-                GetCallerIdentityResponse id = client.getCallerIdentity();
-                msg.add("  SUCCESS");
-                msg.add("  Account: " + id.account());
-                msg.add("  ARN:     " + id.arn());
-                msg.add("  UserId:  " + id.userId());
-            } finally {
-                client.close();
-            }
-        }
-
-        private void testGlueDatabase(List<String> msg) {
-            GlueClient client = GlueClient.builder()
-                    .region(Region.of(REGION))
-                    .httpClient(UrlConnectionHttpClient.builder().build())
-                    .build();
-            try {
-                GetDatabaseRequest.Builder req = GetDatabaseRequest.builder()
-                        .name(DATABASE_NAME);
-                if (CATALOG_ID != null && !CATALOG_ID.isEmpty()) {
-                    req.catalogId(CATALOG_ID);
-                    msg.add("  Using CatalogId: " + CATALOG_ID);
-                }
-
-                GetDatabaseResponse resp = client.getDatabase(req.build());
-
-                msg.add("  SUCCESS - Database accessible!");
-                msg.add("  Name:        " + resp.database().name());
-                msg.add("  Description: " + resp.database().description());
-                msg.add("  LocationUri: " + resp.database().locationUri());
-                msg.add("  CreateTime:  " + resp.database().createTime());
-                msg.add("  CatalogId:   " + resp.database().catalogId());
-
-                if (resp.database().parameters() != null) {
-                    msg.add("  Parameters:");
-                    resp.database().parameters().forEach((k, v) ->
-                        msg.add("    " + k + " = " + v));
-                }
-            } finally {
-                client.close();
-            }
-        }
-
-        private void testGlueTables(List<String> msg) {
-            GlueClient client = GlueClient.builder()
-                    .region(Region.of(REGION))
-                    .httpClient(UrlConnectionHttpClient.builder().build())
-                    .build();
-            try {
-                GetTablesRequest.Builder req = GetTablesRequest.builder()
-                        .databaseName(DATABASE_NAME)
-                        .maxResults(50);
-                if (CATALOG_ID != null && !CATALOG_ID.isEmpty()) {
-                    req.catalogId(CATALOG_ID);
-                }
-
-                GetTablesResponse resp = client.getTables(req.build());
-
-                msg.add("  SUCCESS - Tables retrieved!");
-                msg.add("  Total: " + resp.tableList().size());
-                msg.add("  ----------------------------------------");
-
-                int idx = 1;
-                for (Table t : resp.tableList()) {
-                    msg.add("  Table " + idx++ + ": " + t.name());
-                    msg.add("    Type:       " + t.tableType());
-                    msg.add("    CreateTime: " + t.createTime());
-                    msg.add("    Owner:      " + t.owner());
-                    if (t.storageDescriptor() != null) {
-                        msg.add("    Location:   " + t.storageDescriptor().location());
-                        if (t.storageDescriptor().columns() != null) {
-                            msg.add("    Columns (" + t.storageDescriptor().columns().size() + "):");
-                            t.storageDescriptor().columns().forEach(c ->
-                                msg.add("      - " + c.name() + " (" + c.type() + ")"));
-                        }
-                    }
-                    msg.add("  ----------------------------------------");
-                }
-            } finally {
-                client.close();
-            }
-        }
-
-        private void writeToCloudWatch(List<String> messages) {
-            CloudWatchLogsClient client = CloudWatchLogsClient.builder()
-                    .region(Region.of(REGION))
-                    .httpClient(UrlConnectionHttpClient.builder().build())
-                    .build();
-            try {
-                // Create stream (ignore if exists)
                 try {
-                    client.createLogStream(CreateLogStreamRequest.builder()
-                            .logGroupName(LOG_GROUP)
-                            .logStreamName(LOG_STREAM)
-                            .build());
-                } catch (ResourceAlreadyExistsException e) {
-                    // OK
+                    GetDatabaseResponse dbResponse = glueClient.getDatabase(
+                            GetDatabaseRequest.builder()
+                                    .catalogId(catalogId)
+                                    .name(databaseName)
+                                    .build()
+                    );
+
+                    String dbInfo = "Database found: " + dbResponse.database().name() +
+                            " | Description: " + dbResponse.database().description() +
+                            " | LocationUri: " + dbResponse.database().locationUri();
+                    LOG.info(dbInfo);
+                    report.append(dbInfo).append("\n");
+                    ctx.collect(dbInfo);
+
+                } catch (Exception e) {
+                    String errMsg = "ERROR accessing database '" + databaseName + "': " + e.getMessage();
+                    LOG.error(errMsg);
+                    report.append(errMsg).append("\n");
+                    ctx.collect(errMsg);
+
+                    // Try the alternative database name
+                    String altDbName = databaseName.startsWith("fdk") ?
+                            databaseName.replace("fdk", "fdp") :
+                            databaseName.replace("fdp", "fdk");
+
+                    String retryMsg = "Trying alternative database name: " + altDbName;
+                    LOG.info(retryMsg);
+                    report.append(retryMsg).append("\n");
+                    ctx.collect(retryMsg);
+
+                    try {
+                        GetDatabaseResponse dbResponse2 = glueClient.getDatabase(
+                                GetDatabaseRequest.builder()
+                                        .catalogId(catalogId)
+                                        .name(altDbName)
+                                        .build()
+                        );
+                        String dbInfo2 = "Database found with alt name: " + dbResponse2.database().name();
+                        LOG.info(dbInfo2);
+                        report.append(dbInfo2).append("\n");
+                        ctx.collect(dbInfo2);
+                        // If alt name works, we won't re-list tables here, but log it
+                    } catch (Exception e2) {
+                        String errMsg2 = "Alt database also failed: " + e2.getMessage();
+                        LOG.error(errMsg2);
+                        report.append(errMsg2).append("\n");
+                        ctx.collect(errMsg2);
+                    }
                 }
 
-                // Build events
-                long ts = System.currentTimeMillis();
-                List<InputLogEvent> events = new ArrayList<>();
-                for (int i = 0; i < messages.size(); i++) {
-                    events.add(InputLogEvent.builder()
-                            .timestamp(ts + i)
-                            .message(messages.get(i))
-                            .build());
-                }
+                // --------------------------------------------------------
+                // STEP 2: List all tables in the database
+                // --------------------------------------------------------
+                String step2Msg = "\n=== Step 2: Listing tables in " + databaseName + " ===";
+                LOG.info(step2Msg);
+                report.append(step2Msg).append("\n");
 
-                client.putLogEvents(PutLogEventsRequest.builder()
-                        .logGroupName(LOG_GROUP)
-                        .logStreamName(LOG_STREAM)
-                        .logEvents(events)
-                        .build());
-            } finally {
-                client.close();
+                int totalTables = 0;
+                String nextToken = null;
+
+                do {
+                    GetTablesRequest.Builder requestBuilder = GetTablesRequest.builder()
+                            .catalogId(catalogId)
+                            .databaseName(databaseName);
+
+                    if (nextToken != null) {
+                        requestBuilder.nextToken(nextToken);
+                    }
+
+                    GetTablesResponse tablesResponse = glueClient.getTables(requestBuilder.build());
+
+                    for (Table table : tablesResponse.tableList()) {
+                        totalTables++;
+                        String tableInfo = String.format(
+                                "  Table %d: %-50s | Type: %-15s | Format: %s",
+                                totalTables,
+                                table.name(),
+                                table.tableType() != null ? table.tableType() : "N/A",
+                                table.parameters() != null ?
+                                        table.parameters().getOrDefault("table_type",
+                                                table.parameters().getOrDefault("classification", "N/A"))
+                                        : "N/A"
+                        );
+                        LOG.info(tableInfo);
+                        report.append(tableInfo).append("\n");
+                        ctx.collect(tableInfo);
+                    }
+
+                    nextToken = tablesResponse.nextToken();
+
+                } while (nextToken != null);
+
+                // --------------------------------------------------------
+                // STEP 3: Print summary
+                // --------------------------------------------------------
+                String summary = "\n====================================================\n" +
+                        "  RESULT: Found " + totalTables + " tables in " + databaseName + "\n" +
+                        "  Catalog ID: " + catalogId + "\n" +
+                        "====================================================";
+                LOG.info(summary);
+                report.append(summary).append("\n");
+                ctx.collect(summary);
+
+                // --------------------------------------------------------
+                // STEP 4: Write results to S3 as backup
+                // --------------------------------------------------------
+                writeResultToS3(report.toString());
+
+                glueClient.close();
+
+            } catch (Exception e) {
+                StringWriter sw = new StringWriter();
+                e.printStackTrace(new PrintWriter(sw));
+                String fullError = "FATAL ERROR: " + e.getMessage() + "\n" + sw.toString();
+                LOG.error(fullError);
+                report.append(fullError);
+                ctx.collect(fullError);
+                writeResultToS3(report.toString());
             }
+        }
+
+        /**
+         * Write results to S3 so you can check even if CloudWatch logs are broken.
+         */
+        private void writeResultToS3(String content) {
+            try {
+                software.amazon.awssdk.services.s3.S3Client s3 =
+                        software.amazon.awssdk.services.s3.S3Client.builder()
+                                .region(Region.of(region))
+                                .httpClient(UrlConnectionHttpClient.builder().build())
+                                .build();
+
+                s3.putObject(
+                        software.amazon.awssdk.services.s3.model.PutObjectRequest.builder()
+                                .bucket(s3Bucket)
+                                .key(s3Key)
+                                .contentType("text/plain")
+                                .build(),
+                        software.amazon.awssdk.core.sync.RequestBody.fromString(content)
+                );
+
+                LOG.info("Results written to s3://{}/{}", s3Bucket, s3Key);
+                s3.close();
+
+            } catch (Exception e) {
+                LOG.error("Failed to write results to S3: {}", e.getMessage());
+            }
+        }
+
+        @Override
+        public void cancel() {
+            // Nothing to cancel
         }
     }
 }
