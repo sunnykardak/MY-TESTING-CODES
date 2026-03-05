@@ -4,34 +4,35 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.barclays.flink</groupId>
-    <artifactId>flink-glue-test</artifactId>
-    <version>1.0.0</version>
+    <groupId>com.barclays.poc</groupId>
+    <artifactId>glue-table-lister</artifactId>
+    <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
+    <name>Glue Table Lister - Cross Account POC</name>
 
     <properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>11</java.version>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
         <flink.version>1.18.1</flink.version>
         <aws.sdk.version>2.25.16</aws.sdk.version>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
-        <java.version>11</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>software.amazon.awssdk</groupId>
-                <artifactId>bom</artifactId>
-                <version>${aws.sdk.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
+    <!-- Barclays Nexus Repository -->
+    <repositories>
+        <repository>
+            <id>barclays-nexus</id>
+            <name>Barclays Nexus - External JVM Complete Proxy</name>
+            <url>https://nexus.barcapint.com/nexus/content/repositories/external-jvm-complete-proxy/</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+    </repositories>
 
     <dependencies>
-        <!-- ========== Flink Core (PROVIDED) ========== -->
+
+        <!-- Flink Core (provided by Managed Flink runtime) -->
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-streaming-java</artifactId>
@@ -46,42 +47,42 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- ========== AWS SDK v2 ========== -->
+        <!-- AWS SDK v2 - Glue (to call GetDatabase, GetTables) -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>glue</artifactId>
+            <version>${aws.sdk.version}</version>
         </dependency>
 
+        <!-- AWS SDK v2 - S3 (to write results as backup) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- AWS SDK v2 - STS (for role credentials) -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sts</artifactId>
+            <version>${aws.sdk.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>cloudwatchlogs</artifactId>
-        </dependency>
-
-        <!-- CRITICAL: Explicit HTTP client - AWS SDK v2 needs this -->
-        <!-- url-connection-client is lightweight, no Netty conflicts -->
+        <!-- URL Connection HTTP Client (avoids Apache HTTP classloader issues) -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>url-connection-client</artifactId>
+            <version>${aws.sdk.version}</version>
         </dependency>
 
-        <!-- Explicit: AWS SDK core dependencies that must be in JAR -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>apache-client</artifactId>
-        </dependency>
-
-        <!-- ========== SLF4J (PROVIDED) ========== -->
+        <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>1.7.36</version>
             <scope>provided</scope>
         </dependency>
+
     </dependencies>
 
     <build>
@@ -91,11 +92,12 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>11</source>
-                    <target>11</target>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
                 </configuration>
             </plugin>
 
+            <!-- Shade Plugin - Fat JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -103,26 +105,9 @@
                 <executions>
                     <execution>
                         <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
+                        <goals><goal>shade</goal></goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
-
-                            <!-- NO relocations - they break META-INF/services discovery -->
-
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.barclays.flink.GlueAccessTest</mainClass>
-                                </transformer>
-                                <!-- CRITICAL: Merge all META-INF/services files -->
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                                <!-- Merge META-INF/io.netty.versions.properties if present -->
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
-                                    <resource>META-INF/io.netty.versions.properties</resource>
-                                </transformer>
-                            </transformers>
-
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -130,16 +115,20 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
-                                        <exclude>META-INF/NOTICE*</exclude>
-                                        <exclude>META-INF/LICENSE*</exclude>
-                                        <exclude>META-INF/DEPENDENCIES</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.barclays.poc.GlueTableLister</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
+
 </project>
