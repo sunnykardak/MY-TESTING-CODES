@@ -1,0 +1,32 @@
+Step-by-Step Instructions
+Step 1: Check Nexus for the Glue Hive Client JAR
+Before building, search your Nexus for this critical dependency:
+aws-glue-datacatalog-hive3-client
+Also search for flink-connector-hive. Note the exact versions available — you may need to update the pom.xml version numbers to match what's in your Nexus.
+Step 2: Set up the project
+bashcd C:\devhome\projects\flink-access-test
+
+rd /s /q src\main\java\com\example
+rd /s /q src\main\java\com\barclays
+
+mkdir src\main\java\com\barclays\poc
+Copy the two files:
+
+GlueTableLister.java → src\main\java\com\barclays\poc\GlueTableLister.java
+pom.xml → replace the root pom.xml
+
+Step 3: Build
+bashmvn clean package -DskipTests
+Step 4: Verify
+bashjar tf target\glue-table-lister-1.0-SNAPSHOT.jar | findstr GlueTableLister
+Should show: com/barclays/poc/GlueTableLister.class
+Step 5: Upload and run
+bashaws s3 cp target\glue-table-lister-1.0-SNAPSHOT.jar s3://flink-poc-app-nishikesh/flink-glue-test/glue-table-lister-1.0-SNAPSHOT.jar
+```
+
+Then run from the Flink console. Check results at:
+```
+s3://flink-poc-app-nishikesh/output/glue-hive-catalog-result.txt
+Important Note
+This approach uses HiveCatalog with AWSGlueDataCatalogHiveClientFactory — which is exactly what Anishvaran suggested. But under the hood it still calls the same Glue APIs (GetDatabase, GetTables) on account 767397940910. So it will likely hit the same AccessDenied error unless the target account has added the Glue resource policy.
+That said, it's worth trying because the HiveCatalog approach may use a different credential chain or permission path that could work. Share the S3 output with your lead either way — it proves exactly where the blocker is.
