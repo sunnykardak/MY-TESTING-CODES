@@ -1,0 +1,97 @@
+Cross-Account Database Access POC
+Status Update - RITM4278541
+Date: 06 March 2026  |  Prepared by: Nishikesh
+1. Objective
+Validate cross-account access to the Glue Data Catalog database fdk_uk_customer_db_iceberg hosted in AWS account 767397940910 from our account 739275465799 using AWS Managed Flink (Apache Flink 1.18) and AWS Athena.
+2. Environment Details
+Parameter
+Value
+Our AWS Account
+739275465799
+Target AWS Account
+767397940910
+Region
+eu-west-1 (Ireland)
+Target Database
+fdk_uk_customer_db_iceberg
+Service Role
+svc-role-real-time-transformation-poc
+Flink Runtime
+Apache Flink 1.18
+Flink App Name
+DB-testing-app
+S3 Bucket
+s3://flink-poc-app-nishikesh
+3. Approaches Tried
+3.1 Athena Console - Direct Query
+Attempted to query the cross-account Glue catalog directly from the Athena Query Editor in our AWS Console.
+	•	Ran SHOW TABLES IN "glue:767397940910".fdk_uk_customer_db_iceberg
+	•	Got syntax error - Athena does not support inline cross-account catalog references
+	•	Tried with backticks: SHOW TABLES IN `glue.767397940910`.fdk_uk_customer_db_iceberg
+	•	Got error: Catalog 'glue.767397940910' does not exist
+Result: Failed - Cross-account catalog not registered as a data source in Athena.
+3.2 Athena Console - Register Cross-Account Data Source
+Registered the cross-account Glue catalog as an Athena Data Source.
+	•	Went to Athena > Data Sources > Create Data Source
+	•	Selected "S3 - AWS Glue Data Catalogue"
+	•	Entered Catalog ID: 767397940910
+	•	Data source created successfully as "Athena-9f3ddi0k"
+	•	Ran: SHOW TABLES IN `Athena-9f3ddi0k`.fdk_uk_customer_db_iceberg
+	•	Associated databases showed 0 - no databases visible
+Result: Failed - Data source registered but no access. Our IAM user identity does not have cross-account Glue permissions. The target account has not granted access via a Glue resource policy.
+3.3 Managed Flink Application - Glue SDK Direct Access
+Built a Java Flink application that uses the AWS Glue SDK v2 to call GetDatabase and GetTables directly on the cross-account catalog.
+	•	Created Maven project with Flink 1.18, AWS SDK v2 (Glue, S3, STS, UrlConnectionHttpClient)
+	•	Built fat JAR using maven-shade-plugin, uploaded to S3
+	•	Deployed to Managed Flink app "DB-testing-app" with role svc-role-real-time-transformation-poc
+	•	Flink app started successfully and executed the Glue API calls
+	•	Results written to s3://flink-poc-app-nishikesh/output/glue-table-list-result.txt
+	•	Got AccessDeniedException from Glue API for both fdk_ and fdp_ database variants
+Result: Partially Successful - The Flink application deployed, ran, and made the correct Glue API calls to catalog 767397940910. However, access was denied by the target account.
+4. Summary of Findings
+Approach
+Status
+Details
+Athena - Direct Query
+FAILED
+Syntax not supported for inline cross-account catalog references
+Athena - Data Source
+FAILED
+Data source registered but 0 databases visible. IAM user lacks cross-account Glue access.
+Flink - Glue SDK
+PARTIAL
+App deployed and ran correctly as svc-role-real-time-transformation-poc. Glue API calls reached account 767397940910 but got AccessDenied.
+5. What Is Working
+	•	Flink application builds, deploys, and runs successfully on Managed Flink 1.18
+	•	Flink app correctly assumes the svc-role-real-time-transformation-poc role
+	•	Glue SDK calls are correctly targeting the cross-account catalog (767397940910)
+	•	S3 output mechanism is working (results written to flink-poc-app-nishikesh bucket)
+	•	Athena data source registration completed for the cross-account catalog
+6. Current Blocker
+All approaches fail with AccessDeniedException. The error from the Flink output confirms:
+User: arn:aws:sts::739275465799:assumed-role/svc-role-real-time-transformation-poc/kiam-flink is not authorized to perform: glue:GetDatabase on resource: arn:aws:glue:eu-west-1:767397940910:...
+This means our role has the correct IAM permissions (glue:Get* on Resource: "*") on our side, but the target account (767397940910) has not granted access via a Glue catalog resource policy.
+Cross-account Glue access requires both sides to have the correct permissions: our role needs glue:Get* (which it has), AND the target account needs a resource policy on their Glue catalog allowing our role.
+7. Action Required from Target Account Team
+The team managing account 767397940910 (ADP/EDB team - contact: Amol) needs to add the following Glue Catalog Resource Policy on their Glue catalog in eu-west-1:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::739275465799:role/svc-role-real-time-transformation-poc"
+    },
+    "Action": ["glue:GetDatabase","glue:GetDatabases","glue:GetTable",
+               "glue:GetTables","glue:GetPartitions"],
+    "Resource": [
+      "arn:aws:glue:eu-west-1:767397940910:catalog",
+      "arn:aws:glue:eu-west-1:767397940910:database/fdk_uk_customer_db_iceberg",
+      "arn:aws:glue:eu-west-1:767397940910:table/fdk_uk_customer_db_iceberg/*"
+    ]
+  }]
+}
+8. Next Steps
+	•	Escalate to ADP/EDB team (Amol) to add the Glue catalog resource policy on account 767397940910
+	•	Verify Lake Formation permissions - If the target account uses Lake Formation, the table grants may also need to be shared via Lake Formation cross-account sharing
+	•	Re-run Flink POC - Once the resource policy is added, re-run the existing Flink app (no code changes needed) to validate access
+	•	Proceed to data read - Once table listing works, extend the Flink app to read actual table data using Athena JDBC or the Iceberg-Flink connector
